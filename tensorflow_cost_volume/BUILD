@@ -23,7 +23,7 @@ custom_op_library(
 
 py_library(
     name = "tensorflow_cost_volume",
-    srcs = glob(["*.py"]),
+    srcs = glob(["**/*.py"], exclude = ["python/ops/*_test.py"]),
     data = [
         ":_cost_volume.so"
     ],
@@ -31,13 +31,13 @@ py_library(
 )
 
 py_test(
-    name = "time_two_ops_py_test",
+    name = "cost_volume_ops_py_test",
     srcs = [
-        "python/ops/time_two_ops_test.py"
+        "python/ops/cost_volume_ops_test.py"
     ],
-    main = "python/ops/time_two_ops_test.py",
+    main = "python/ops/cost_volume_ops_test.py",
     deps = [
-        ":time_two_ops_py",
+        ":tensorflow_cost_volume",
     ],
     srcs_version = "PY2AND3",
 )

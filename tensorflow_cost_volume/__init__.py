@@ -16,4 +16,4 @@
 
 from __future__ import absolute_import
 
-from tensorflow_time_two.python.ops.time_two_ops import time_two
+from tensorflow_cost_volume.python.ops.cost_volume_ops import cost_volume
