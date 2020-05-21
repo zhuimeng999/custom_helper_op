@@ -23,9 +23,9 @@ from tensorflow.python.framework import ops
 from tensorflow.python.platform import test
 from tensorflow.python.framework import test_util
 try:
-  from tensorflow_time_two.python.ops import time_two_ops
+  from tensorflow_cost_volume.python.ops import cost_volume_ops
 except ImportError:
-  import time_two_ops
+  import tensorflow_cost_volume
 
 
 class TimeTwoTest(test.TestCase):
@@ -35,7 +35,7 @@ class TimeTwoTest(test.TestCase):
     with self.test_session():
       with ops.device("/gpu:0"):
         self.assertAllClose(
-            time_two_ops.time_two([[1, 2], [3, 4]]), np.array([[2, 4], [6, 8]]))
+            cost_volume_ops.cost_volume([[1, 2], [3, 4]]), np.array([[2, 4], [6, 8]]))
 
 
 if __name__ == '__main__':

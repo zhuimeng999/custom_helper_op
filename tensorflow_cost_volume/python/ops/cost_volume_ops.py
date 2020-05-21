@@ -17,10 +17,11 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
+import os
 from tensorflow.python.framework import load_library
 from tensorflow.python.platform import resource_loader
+from tensorflow_cost_volume.python.utils.path_helper import package_root
 
-time_two_ops = load_library.load_op_library(
-    resource_loader.get_path_to_datafile('_time_two_ops.so'))
-time_two = time_two_ops.time_two
+cost_volume_ops = load_library.load_op_library(
+    os.path.join(package_root, '_cost_volume.so'))
+cost_volume = cost_volume_ops.cost_volume
