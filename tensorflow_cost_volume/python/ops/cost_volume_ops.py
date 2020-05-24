@@ -21,7 +21,25 @@ import os
 from tensorflow.python.framework import load_library
 from tensorflow.python.platform import resource_loader
 from tensorflow_cost_volume.python.utils.path_helper import package_root
+import tensorflow as tf
 
 cost_volume_ops = load_library.load_op_library(
     os.path.join(package_root, '_cost_volume.so'))
-cost_volume = cost_volume_ops.cost_volume
+
+@tf.function
+def cost_volume(images, transforms, name=None):
+    with tf.name_scope(name or "cost_volume"):
+        images_tensor = tf.convert_to_tensor(images, name="data")
+        transforms_tensor = tf.convert_to_tensor(transforms, name="warp")
+        return cost_volume_ops.cost_volume(images=images_tensor, transforms=transforms_tensor, interpolation='BILINEAR')
+
+
+@tf.RegisterGradient("CostVolume")
+def _cost_volume_grad(op, grad_output):
+    images_tensor, transforms_tensor = op.inputs
+    grad_output_tensor = tf.convert_to_tensor(grad_output, name="grad_output")
+    image_grad = cost_volume_ops.cost_volume_grad(images=images_tensor, transforms=transforms_tensor, grad=grad_output_tensor, interpolation='BILINEAR')
+    return [image_grad, None]
+
+
+tf.no_gradient("CostVolumeGrad")
