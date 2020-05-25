@@ -38,6 +38,7 @@ Status CostVolumeShapeFn(InferenceContext *c) {
   auto channel_dim = c->Dim(images_shape, 4);
   auto depth_dim = c->Dim(homos_shape, 2);
   c->set_output(0, c->MakeShape({batch_dim, height, width, depth_dim, channel_dim}));
+  c->set_output(1, c->MakeShape({batch_dim, height, width, depth_dim, 1}));
   return Status::OK();
 }
 
@@ -97,6 +98,7 @@ REGISTER_OP("CostVolume")
     .Attr("dtype: {float32}")
     .Attr("interpolation: string")
     .Output("transformed_images: dtype")
+    .Output("transformed_mask: dtype")
     .SetShapeFn(CostVolumeShapeFn)
     .Doc(kCostVolumeDoc);
 

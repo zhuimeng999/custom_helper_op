@@ -36,14 +36,14 @@ enum Interpolation { INTERPOLATION_NEAREST, INTERPOLATION_BILINEAR };
 
 template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
 struct CostVolumeFunctor {
-  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, Tensor* output);
+  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor *output_mask);
 };
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
 template <typename T, Interpolation INTERPOLATION_TYPE>
 struct CostVolumeFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE> {
-  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, Tensor* output);
+  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor *output_mask);
 };
 #endif
 

@@ -35,9 +35,9 @@ def cost_volume(images, transforms, name=None):
 
 
 @tf.RegisterGradient("CostVolume")
-def _cost_volume_grad(op, grad_output):
+def _cost_volume_grad(op, grad_out, grad_mask):
     images_tensor, transforms_tensor = op.inputs
-    grad_output_tensor = tf.convert_to_tensor(grad_output, name="grad_output")
+    grad_output_tensor = tf.convert_to_tensor(grad_out, name="grad_output")
     image_grad = cost_volume_ops.cost_volume_grad(images=images_tensor, transforms=transforms_tensor, grad=grad_output_tensor, interpolation='BILINEAR')
     return [image_grad, None]
 

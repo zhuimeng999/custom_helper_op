@@ -35,7 +35,7 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
 
 template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
 void CostVolumeFunctor<Device, T, INTERPOLATION_TYPE>::operator() 
-  (const Device& d, const Tensor& images, const Tensor& transforms, Tensor* output){
+  (const Device& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor* output_mask){
     CHECK_EQ(1, 2);
   }
 
@@ -85,16 +85,20 @@ class CostVolumeOp : public OpKernel {
     OP_REQUIRES(ctx, (transform_t.dim_size(0) == images_t.dim_size(0)) && (transform_t.dim_size(1) == (images_t.dim_size(1) - 1)),
                 errors::InvalidArgument("the first dim of images and transforms must be equal, and the second dim of images and transforms must greater than 1"));
 
-    Tensor* output_t = nullptr;
+    Tensor* output = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,
                             TensorShape({images_t.dim_size(0), images_t.dim_size(2), images_t.dim_size(3), transform_t.dim_size(2), images_t.dim_size(4)}),
-                            &output_t));
-
+                            &output));
+    Tensor* output_mask = nullptr;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            1,
+                            TensorShape({images_t.dim_size(0), images_t.dim_size(2), images_t.dim_size(3), transform_t.dim_size(2), 1}),
+                            &output_mask));
 
     if(interpolation_ == INTERPOLATION_BILINEAR){
       CostVolumeFunctor<Device, T, INTERPOLATION_BILINEAR>()(
-          ctx->eigen_device<Device>(), images_t, transform_t, output_t);
+          ctx->eigen_device<Device>(), images_t, transform_t, output, output_mask);
     } 
 
   }

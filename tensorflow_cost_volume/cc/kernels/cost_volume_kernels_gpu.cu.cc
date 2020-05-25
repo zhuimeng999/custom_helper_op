@@ -35,14 +35,14 @@ template <typename T, typename INDEX_TYPE, Interpolation INTERPOLATION_TYPE>
 __global__ void CostVolumeKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, const INDEX_TYPE image_height, const INDEX_TYPE image_width, 
               const INDEX_TYPE image_depth, const INDEX_TYPE image_channels, const INDEX_TYPE image_num,
-              const T* images_data, const T* transforms_data, T* out_data){
+              const T* images_data, const T* transforms_data, T* out_data, T* out_mask_data){
   const INDEX_TYPE img_height_step = image_width*image_channels;
   const INDEX_TYPE img_step =  image_height*img_height_step;
   const INDEX_TYPE batch_img_step = image_num*img_step;
   const INDEX_TYPE homos_step = image_depth*8;
   const INDEX_TYPE batch_homos_step = (image_num - 1)*homos_step;
 
-  for (auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
+  for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
     auto tmp = i/image_depth;
     const auto cd = i - tmp*image_depth;
     auto tmp1 = tmp;
@@ -98,10 +98,12 @@ __global__ void CostVolumeKernel(const INDEX_TYPE virtual_thread,
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = out_channels[cc]/used_sample;
       }
+      out_mask_data[i] = T(1);
     } else {
       for(int cc = 0; cc < image_channels; cc++){
-        out_channels[cc] = 1000;
+        out_channels[cc] = 100;
       }
+      out_mask_data[i] = T(0);
     }
   }
 }
@@ -110,7 +112,7 @@ template <typename T, typename INDEX_TYPE, Interpolation INTERPOLATION_TYPE>
 __global__ void CostVolumeKernelNoBatch(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, const INDEX_TYPE image_height, const INDEX_TYPE image_width, 
               const INDEX_TYPE image_depth, const INDEX_TYPE image_channels, const INDEX_TYPE image_num,
-              const T* images_data, const T* transforms_data, T* out_data){
+              const T* images_data, const T* transforms_data, T* out_data,T* out_mask_data){
   (void )batch_size;
   const INDEX_TYPE img_height_step = image_width*image_channels;
   const INDEX_TYPE homos_step = image_depth*8;
@@ -166,10 +168,12 @@ __global__ void CostVolumeKernelNoBatch(const INDEX_TYPE virtual_thread,
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = out_channels[cc]/used_sample;
       }
+      out_mask_data[i] = T(1);
     } else {
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = 100;
       }
+      out_mask_data[i] = T(0);
     }
   }
 }
@@ -219,7 +223,7 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
 // Define the GPU implementation that launches the CUDA kernel.
 template <typename T, Interpolation INTERPOLATION_TYPE>
 void CostVolumeFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE>::operator()(
-    const GPUDevice& d, const Tensor& images, const Tensor& transforms, Tensor* output) {
+    const GPUDevice& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor* output_mask) {
     const int64 batch_size = output->dim_size(0);
     const int64 image_height = output->dim_size(1);
     const int64 image_width = output->dim_size(2);
@@ -236,24 +240,24 @@ void CostVolumeFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE>::operator()(
         auto config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeKernelNoBatch<T, int64, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeKernelNoBatch<T, int64, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data(), output_mask->tensor<T, 5>().data());
       } else {
         auto config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeKernel<T, int64, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeKernel<T, int64, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data(), output_mask->tensor<T, 5>().data());
       }
     } else {
       if(batch_size == 1){
         auto config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeKernelNoBatch<T, int, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeKernelNoBatch<T, int, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data(), output_mask->tensor<T, 5>().data());
       } else {
         auto config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeKernel<T, int, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeKernel<T, int, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), output->tensor<T, 5>().data(), output_mask->tensor<T, 5>().data());
       }
     }
 }

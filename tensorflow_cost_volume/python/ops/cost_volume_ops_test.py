@@ -57,10 +57,9 @@ class MyOperatorTest(test_util.parameterized.TestCase):
     images_tensor = tf.constant(images)
     transforms_tensor = tf.constant(transforms)
     with tf.GradientTape() as tape:
-      cost = cost_volume(images_tensor, transforms_tensor)
+      cost, mask = cost_volume(images_tensor, transforms_tensor)
 
     gradients = tape.gradient(cost, images_tensor)
-    # cost = cost_volume(images, transforms)
     self.assertEqual(cost.shape, np.array([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, IMAGE_CHANNELS]))
 
     cost_out = cost.numpy()
@@ -91,10 +90,9 @@ class MyOperatorTest(test_util.parameterized.TestCase):
     transforms_tensor = tf.constant(transforms)
     with tf.GradientTape() as tape:
       tape.watch(images_tensor)
-      cost = cost_volume(images_tensor, transforms_tensor)
+      cost, mask = cost_volume(images_tensor, transforms_tensor)
 
     gradients = tape.gradient(cost, [images_tensor])[0]
-    # cost = cost_volume(images, transforms)
     self.assertEqual(cost.shape, np.array([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, IMAGE_CHANNELS]))
 
     cost_out = cost.numpy()
@@ -138,7 +136,7 @@ class MyOperatorTest(test_util.parameterized.TestCase):
     transforms_tensor = tf.constant(transforms)
     with tf.GradientTape() as tape:
       tape.watch(images_tensor)
-      cost = cost_volume(images_tensor, transforms_tensor)
+      cost, mask = cost_volume(images_tensor, transforms_tensor)
 
     gradients = tape.gradient(cost, images_tensor)
     # cost = cost_volume(images, transforms)
@@ -174,7 +172,7 @@ class MyOperatorTest(test_util.parameterized.TestCase):
     transforms_tensor = tf.constant(transforms)
     with tf.GradientTape() as tape:
       tape.watch(images_tensor)
-      cost = cost_volume(images_tensor, transforms_tensor)
+      cost, mask = cost_volume(images_tensor, transforms_tensor)
 
     gradients = tape.gradient(cost, images_tensor)
     # cost = cost_volume(images, transforms)
