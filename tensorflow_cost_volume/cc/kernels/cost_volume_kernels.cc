@@ -43,7 +43,7 @@ void CostVolumeFunctor<Device, T, INTERPOLATION_TYPE>::operator()
 
   template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
   void CostVolumeGradFunctor<Device, T, INTERPOLATION_TYPE>::operator() 
-    (const Device& d, const Tensor& images, const Tensor& transforms, const Tensor& grad, Tensor* output){
+    (const Device& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output){
       CHECK_EQ(1, 2);
   }
   template struct CostVolumeGradFunctor<CPUDevice, float, INTERPOLATION_BILINEAR>;
@@ -152,7 +152,8 @@ class CostVolumeGradOp : public OpKernel {
   void Compute(OpKernelContext* ctx) override {
     const Tensor& images_t = ctx->input(0);
     const Tensor& transform_t = ctx->input(1);
-    const Tensor& grad_t = ctx->input(2);
+    const Tensor& transformed_mask = ctx->input(2);
+    const Tensor& grad_t = ctx->input(3);
     OP_REQUIRES(ctx, images_t.shape().dims() == 5,
                 errors::InvalidArgument("Input images must have rank 5"));
     OP_REQUIRES(ctx, (transform_t.shape().dims() == 4) && (transform_t.dim_size(3) == 8),
@@ -168,7 +169,7 @@ class CostVolumeGradOp : public OpKernel {
 
     if(interpolation_ == INTERPOLATION_BILINEAR){
       CostVolumeGradFunctor<Device, T, INTERPOLATION_BILINEAR>()(
-          ctx->eigen_device<Device>(), images_t, transform_t, grad_t, output_t);
+          ctx->eigen_device<Device>(), images_t, transform_t, transformed_mask, grad_t, output_t);
     } 
   }
 };

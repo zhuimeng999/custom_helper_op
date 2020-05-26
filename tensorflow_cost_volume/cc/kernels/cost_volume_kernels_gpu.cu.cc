@@ -59,7 +59,7 @@ __global__ void CostVolumeKernel(const INDEX_TYPE virtual_thread,
     for(INDEX_TYPE cc = 0; cc < image_channels; cc++){
       out_channels[cc] = T(0);
     }
-    int used_sample = 0;
+    T used_sample = T(0);
     for(INDEX_TYPE cn = 1; cn < image_num; cn++){
       const T *src_homos = &curr_homos[(cn - 1)*homos_step];
       T projection = src_homos[6] * cw + src_homos[7] * ch + 1.f;
@@ -91,14 +91,15 @@ __global__ void CostVolumeKernel(const INDEX_TYPE virtual_thread,
           T diff = src_sample - ref_channels[cc];
           out_channels[cc] += diff*diff;
         }
-        used_sample++;
+        used_sample = used_sample + 1;
       }
     }
+    out_mask_data[i] = used_sample;
     if(used_sample > 0){
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = out_channels[cc]/used_sample;
       }
-      out_mask_data[i] = T(1);
+
     } else {
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = 100;
@@ -129,7 +130,7 @@ __global__ void CostVolumeKernelNoBatch(const INDEX_TYPE virtual_thread,
     for(INDEX_TYPE cc = 0; cc < image_channels; cc++){
       out_channels[cc] = T(0);
     }
-    int used_sample = 0;
+    T used_sample = T(0);
     for(INDEX_TYPE cn = 1; cn < image_num; cn++){
       const T *src_homos = &curr_homos[(cn - 1)*homos_step];
       T projection = src_homos[6] * cw + src_homos[7] * ch + 1.f;
@@ -161,19 +162,18 @@ __global__ void CostVolumeKernelNoBatch(const INDEX_TYPE virtual_thread,
           T diff = src_sample - ref_channels[cc];
           out_channels[cc] += diff*diff;
         }
-        used_sample++;
+        used_sample = used_sample + 1;
       }
     }
-    if(used_sample > 0){
+    out_mask_data[i] = used_sample;
+    if(used_sample > 0.5f){
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = out_channels[cc]/used_sample;
       }
-      out_mask_data[i] = T(1);
     } else {
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = 100;
       }
-      out_mask_data[i] = T(0);
     }
   }
 }
@@ -268,14 +268,17 @@ template <typename T, typename INDEX_TYPE, Interpolation INTERPOLATION_TYPE>
 __global__ void CostVolumeGradKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, const INDEX_TYPE image_height, const INDEX_TYPE image_width, 
               const INDEX_TYPE image_depth, const INDEX_TYPE image_channels, const INDEX_TYPE image_num,
-              const T* images_data, const T* transforms_data, const T* grad_data, T* out_data){
+              const T* images_data, const T* transforms_data, const T* transformed_mask_data, const T* grad_data, T* out_data){
   const INDEX_TYPE img_height_step = image_width*image_channels;
   const INDEX_TYPE img_step =  image_height*img_height_step;
   const INDEX_TYPE batch_img_step = image_num*img_step;
   const INDEX_TYPE homos_step = image_depth*8;
   const INDEX_TYPE batch_homos_step = (image_num - 1)*homos_step;
-  const T src_num = image_num - 1;
+
   for (auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
+    if(transformed_mask_data[i] < 0.5){
+      continue;
+    }
     auto tmp = i/image_depth;
     const auto cd = i - tmp*image_depth;
     auto tmp1 = tmp;
@@ -292,7 +295,6 @@ __global__ void CostVolumeGradKernel(const INDEX_TYPE virtual_thread,
 
     const T *grad_channels = &grad_data[i*image_channels];
 
-    int used_sample = 0;
     for(INDEX_TYPE cn = 1; cn < image_num; cn++){
       const T *src_homos = &curr_homos[(cn - 1)*homos_step];
       T projection = src_homos[6] * cw + src_homos[7] * ch + 1.f;
@@ -326,14 +328,13 @@ __global__ void CostVolumeGradKernel(const INDEX_TYPE virtual_thread,
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
                                   coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
           T diff = src_sample - ref_channels[cc];
-          T ref_grad = 2*diff*grad_channels[cc]/src_num;
+          T ref_grad = 2*diff*grad_channels[cc]/transformed_mask_data[i];
           atomicAdd(&ref_out_channels[cc], -ref_grad);
           atomicAdd(&src_out_channels_ff[cc], ref_grad*coef_cc);
           atomicAdd(&src_out_channels_fc[cc], ref_grad*coef_cf);
           atomicAdd(&src_out_channels_cc[cc], ref_grad*coef_ff);
           atomicAdd(&src_out_channels_cf[cc], ref_grad*coef_fc);
         }
-        used_sample++;
       }
     }
   }
@@ -343,12 +344,15 @@ template <typename T, typename INDEX_TYPE, Interpolation INTERPOLATION_TYPE>
 __global__ void CostVolumeGradKernelNoBatch(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, const INDEX_TYPE image_height, const INDEX_TYPE image_width, 
               const INDEX_TYPE image_depth, const INDEX_TYPE image_channels, const INDEX_TYPE image_num,
-              const T* images_data, const T* transforms_data, const T* grad_data, T* out_data){
+              const T* images_data, const T* transforms_data, const T* transformed_mask_data, const T* grad_data, T* out_data){
   (void )batch_size;
   const INDEX_TYPE img_height_step = image_width*image_channels;
   const INDEX_TYPE homos_step = image_depth*8;
-  const T src_num = image_num - 1;
+
   for (auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
+    if(transformed_mask_data[i] < 0.5){
+      continue;
+    }
     auto tmp = i/image_depth;
     const auto cd = i - tmp*image_depth;
     const auto ch = tmp/image_width;
@@ -359,7 +363,7 @@ __global__ void CostVolumeGradKernelNoBatch(const INDEX_TYPE virtual_thread,
     const T *  curr_homos = &transforms_data[cd*8];
 
     const T *grad_channels = &grad_data[i*image_channels];
-    int used_sample = 0;
+
     for(INDEX_TYPE cn = 1; cn < image_num; cn++){
       const T *src_homos = &curr_homos[(cn - 1)*homos_step];
       T projection = src_homos[6] * cw + src_homos[7] * ch + 1.f;
@@ -393,7 +397,7 @@ __global__ void CostVolumeGradKernelNoBatch(const INDEX_TYPE virtual_thread,
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
                                   coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
           T diff = src_sample - ref_channels[cc];
-          T ref_grad = 2*diff*grad_channels[cc]/src_num;
+          T ref_grad = 2*diff*grad_channels[cc]/transformed_mask_data[i];
           atomicAdd(&ref_out_channels[cc], -ref_grad);
           atomicAdd(&src_out_channels_ff[cc], ref_grad*coef_cc);
           atomicAdd(&src_out_channels_fc[cc], ref_grad*coef_cf);
@@ -417,7 +421,7 @@ __global__ void SetZeroBig(const INDEX_TYPE count, T* __restrict__ ptr) {
 // Define the GPU implementation that launches the CUDA kernel.
 template <typename T, Interpolation INTERPOLATION_TYPE>
 void CostVolumeGradFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE>::operator()(
-    const GPUDevice& d, const Tensor& images, const Tensor& transforms, const Tensor& grad, Tensor* output) {
+    const GPUDevice& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output) {
     const int64 batch_size = grad.dim_size(0);
     const int64 image_height = grad.dim_size(1);
     const int64 image_width = grad.dim_size(2);
@@ -436,12 +440,14 @@ void CostVolumeGradFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE>::operator()(
         config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeGradKernelNoBatch<T, int64, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeGradKernelNoBatch<T, int64, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(), 
+                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
       } else {
         config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeGradKernel<T, int64, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeGradKernel<T, int64, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(),
+                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
       }
     } else {
       auto config = GetGpuLaunchConfigBig(input_image_size, d, SetZeroBig<T, int>, 0, 0);
@@ -450,12 +456,14 @@ void CostVolumeGradFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE>::operator()(
         config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeGradKernelNoBatch<T, int, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeGradKernelNoBatch<T, int, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(),
+                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
       } else {
         config = GetGpuLaunchConfigBig(loop_count, d, CostVolumeGradKernel<T, int, INTERPOLATION_TYPE>, 0, 0);
         CostVolumeGradKernel<T, int, INTERPOLATION_TYPE><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
                                   loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
+                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(),
+                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
       }
     }
 }

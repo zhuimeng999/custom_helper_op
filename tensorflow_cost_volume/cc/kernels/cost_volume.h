@@ -49,14 +49,14 @@ struct CostVolumeFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE> {
 
 template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
 struct CostVolumeGradFunctor {
-  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, const Tensor& grad, Tensor* output);
+  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output);
 };
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
 template <typename T, Interpolation INTERPOLATION_TYPE>
 struct CostVolumeGradFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE> {
-  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, const Tensor& grad, Tensor* output);
+  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output);
 };
 #endif
 
