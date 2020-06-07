@@ -59,3 +59,15 @@ py_test(
     ],
     srcs_version = "PY2AND3",
 )
+
+py_test(
+    name = "depth_projection_layer_py_test",
+    srcs = [
+        "python/layers/depth_projection_layer_test.py"
+    ],
+    main = "python/layers/depth_projection_layer_test.py",
+    deps = [
+        ":custom_helper_op",
+    ],
+    srcs_version = "PY2AND3",
+)

@@ -22,8 +22,8 @@ template <typename T>
 __global__ void SetToIndex(const int32 count, T* __restrict__ out_data, const int32 out_width) {
   for (const auto i : GpuGridRangeX<int32>(count)) {
     T *tmp = &out_data[i*3];
-    tmp[0] = T(i/out_width);
-    tmp[1] = T(i%out_width);
+    tmp[0] = T(i%out_width);
+    tmp[1] = T(i/out_width);
     tmp[2] = T(1.0);
   }
 }

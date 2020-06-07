@@ -25,8 +25,8 @@ struct FillIndexFunctor<Eigen::ThreadPoolDevice, T> {
     auto initializer_function = [&](const int start, const int limit) {
       for (int i = start; i < limit; ++i) {
         T *tmp = &out_data[i*3];
-        tmp[0] = T(i/out_width);
-        tmp[1] = T(i%out_width);
+        tmp[0] = T(i%out_width);
+        tmp[1] = T(i/out_width);
         tmp[2] = T(1.0);
       }
     };
@@ -63,13 +63,18 @@ class IndexInitializerOp : public OpKernel {
     OP_REQUIRES(ctx, shape_t.dims() == 1,
                   errors::InvalidArgument("output shape must be 1-dimensional",
                                           shape_t.shape().DebugString()));
-    OP_REQUIRES(ctx, shape_t.NumElements() == 2,
-                  errors::InvalidArgument("output shape must have two elements",
+    OP_REQUIRES(ctx, shape_t.NumElements() == 3,
+                  errors::InvalidArgument("output shape must have 3 elements",
                                           shape_t.shape().DebugString()));
 
     auto shape_vec = shape_t.flat<int32>();                    
     auto out_height = shape_vec(0);
     auto out_width = shape_vec(1);
+
+    OP_REQUIRES(ctx, shape_vec(2) == 3,
+                  errors::InvalidArgument("last dimsion must be 3",
+                                          shape_vec(2)));
+
     Tensor *output;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,

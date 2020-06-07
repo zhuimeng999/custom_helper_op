@@ -133,12 +133,13 @@ REGISTER_OP("IndexInitializer")
       ShapeHandle size;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &size));
       DimensionHandle unused;
-      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(size, 0), 2, &unused));
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(size, 0), 3, &unused));
 
       // Get size values from the size tensor.
       const Tensor *size_tensor = c->input_tensor(0);
       DimensionHandle width;
       DimensionHandle height;
+      DimensionHandle channels;
       if (size_tensor == nullptr) {
         width = c->UnknownDim();
         height = c->UnknownDim();
@@ -154,9 +155,16 @@ REGISTER_OP("IndexInitializer")
         auto vec = size_tensor->vec<int32>();
         height = c->MakeDim(vec(0));
         width = c->MakeDim(vec(1));
+        channels = c->MakeDim(vec(2));
+        if (vec(2) != 3) {
+          return errors::InvalidArgument(
+              "Bad output_shape size for IndexInitializer: last dimension mast be 3"
+              "but got ",
+              vec(2));
+        }
       }
 
-      c->set_output(0, c->MakeShape({height, width, 3}));
+      c->set_output(0, c->MakeShape({height, width, channels}));
       return Status::OK();
     })
     .Doc(kIndexInitializerDoc);

@@ -37,17 +37,17 @@ class IndexInitializerTest(test_util.parameterized.TestCase):
     test_data = np.empty((out_shape[0], out_shape[1], 3), dtype=np.float)
     for i in range(out_shape[0]):
         for j in range(out_shape[1]):
-            test_data[i, j, 0] = i
-            test_data[i, j, 1] = j
+            test_data[i, j, 0] = j
+            test_data[i, j, 1] = i
             test_data[i, j, 2] = 1
 
 
     with tf.device('/cpu:0'):
-      output = tf.Variable(index_initializer()(output_shape=out_shape , dtype=tf.float32))
+      output = tf.Variable(index_initializer()(output_shape=(out_shape[0], out_shape[1], 3) , dtype=tf.float32))
     np.testing.assert_almost_equal(test_data, output.numpy())
 
     with tf.device('/gpu:0'):
-      output = tf.Variable(index_initializer()(output_shape=out_shape , dtype=tf.float32))
+      output = tf.Variable(index_initializer()(output_shape=(out_shape[0], out_shape[1], 3) , dtype=tf.float32))
     np.testing.assert_almost_equal(test_data, output.numpy())
     #self.assertAlmostEqual(t, delta=1e-8)
 
