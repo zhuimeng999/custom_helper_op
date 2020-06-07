@@ -9,15 +9,21 @@ config_setting(
 )
 
 custom_op_library(
-    name = "_cost_volume.so",
+    name = "_custom_helper_ops.so",
     srcs = [
         "cc/kernels/cost_volume_kernels.cc",
         "cc/kernels/cost_volume.h",
-        "cc/ops/cost_volume_ops.cc",
+        "cc/kernels/index_initializer_kernels.cc",
+
+        "cc/kernels/index_initializer.h",
+        "cc/ops/custom_helper_ops.cc",
     ],
     cuda_srcs = [
         "cc/kernels/cost_volume.h",
         "cc/kernels/cost_volume_kernels_gpu.cu.cc",
+
+        "cc/kernels/index_initializer.h",
+        "cc/kernels/index_initializer_kernels_gpu.cu.cc",
     ],
 )
 
@@ -25,17 +31,29 @@ py_library(
     name = "custom_helper_op",
     srcs = glob(["**/*.py"], exclude = ["python/ops/*_test.py"]),
     data = [
-        ":_cost_volume.so"
+        ":_custom_helper_ops.so"
     ],
     srcs_version = "PY2AND3",
 )
 
 py_test(
-    name = "cost_volume_ops_py_test",
+    name = "cost_volume_op_py_test",
     srcs = [
-        "python/ops/cost_volume_ops_test.py"
+        "python/ops/cost_volume_op_test.py"
     ],
-    main = "python/ops/cost_volume_ops_test.py",
+    main = "python/ops/cost_volume_op_test.py",
+    deps = [
+        ":custom_helper_op",
+    ],
+    srcs_version = "PY2AND3",
+)
+
+py_test(
+    name = "index_initializer_op_py_test",
+    srcs = [
+        "python/ops/index_initializer_op_test.py"
+    ],
+    main = "python/ops/index_initializer_op_test.py",
     deps = [
         ":custom_helper_op",
     ],

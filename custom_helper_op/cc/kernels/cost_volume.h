@@ -25,7 +25,7 @@ limitations under the License.
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 
 namespace tensorflow {
-namespace addons {
+namespace custom_helper_op {
 
 // NOTE(ringwalt): We MUST wrap the generate() call in a functor and explicitly
 // instantiate the functor in image_ops_gpu.cu.cc. Otherwise, we will be missing
@@ -62,7 +62,7 @@ struct CostVolumeGradFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE> {
 
 }  // end namespace functor
 
-}  // end namespace addons
+}  // end namespace custom_helper_op
 }  // end namespace tensorflow
 
 #endif  // TENSORFLOW_ADDONS_IMAGE_KERNELS_IMAGE_PROJECTIVE_TRANSFORM_OP_H__

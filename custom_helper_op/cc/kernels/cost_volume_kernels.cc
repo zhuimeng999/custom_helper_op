@@ -26,7 +26,7 @@ limitations under the License.
 #include "custom_helper_op/cc/kernels/cost_volume.h"
 
 namespace tensorflow {
-namespace addons {
+namespace custom_helper_op {
 
 namespace functor {
 

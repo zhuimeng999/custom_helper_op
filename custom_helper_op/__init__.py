@@ -16,4 +16,4 @@
 
 from __future__ import absolute_import
 
-from custom_helper_op.python.ops.cost_volume_ops import cost_volume
+from custom_helper_op.python.ops.custom_helper_ops import cost_volume, index_initializer
