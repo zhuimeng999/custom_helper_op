@@ -49,7 +49,7 @@ def get_project_name_version():
     with open(os.path.join(base_dir, "custom_helper_op", "version.py")) as fp:
         exec(fp.read(), version)
 
-    project_name = "tensorflow-cost-volume"
+    project_name = "custom-helper-op"
     if "--nightly" in sys.argv:
         project_name = "tfa-nightly"
         version["__version__"] += get_last_commit_time()

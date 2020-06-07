@@ -54,7 +54,7 @@ function main() {
 
   TMPDIR=$(mktemp -d -t tmp.XXXXXXXXXX)
   echo $(date) : "=== Using tmpdir: ${TMPDIR}"
-  echo "=== Copy TensorFlow Cost Volume files"
+  echo "=== Copy Custom Helper Op files"
 
   cp ${PIP_FILE_PREFIX}setup.py "${TMPDIR}"
   cp ${PIP_FILE_PREFIX}MANIFEST.in "${TMPDIR}"
