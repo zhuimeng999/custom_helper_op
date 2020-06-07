@@ -23,7 +23,7 @@ __global__ void SetToIndex(const int32 count, T* __restrict__ out_data, const in
   for (const auto i : GpuGridRangeX<int32>(count)) {
     T *tmp = &out_data[i*3];
     tmp[0] = T(i/out_width);
-    tmp[1] = i - tmp[0]*out_width;
+    tmp[1] = T(i%out_width);
     tmp[2] = T(1.0);
   }
 }

@@ -46,7 +46,7 @@ def _cost_volume_grad(op, grad_out, grad_mask):
 tf.no_gradient("CostVolumeGrad")
 
 class index_initializer(tf.initializers.Initializer):
-  def __call__(self, shape, dtype=tf.float32):
+  def __call__(self, output_shape, dtype=tf.float32):
     """Returns a tensor object initialized as specified by the initializer.
 
     Args:
@@ -57,5 +57,4 @@ class index_initializer(tf.initializers.Initializer):
     Raises:
       ValuesError: If the dtype is not numeric or boolean.
     """
-    shape_tensor = tf.convert_to_tensor(shape, name="index_init")
-    return _custom_helper_ops.index_initializer(output_shape = shape_tensor, dtype = dtype)
+    return _custom_helper_ops.index_initializer(output_shape=output_shape, dtype=dtype)

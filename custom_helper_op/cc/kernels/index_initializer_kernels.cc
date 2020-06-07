@@ -8,6 +8,7 @@
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/core/framework/tensor_util.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include "custom_helper_op/cc/kernels/index_initializer.h"
@@ -53,16 +54,22 @@ class IndexInitializerOp : public OpKernel {
 
   void Compute(OpKernelContext* ctx) override {
     const Tensor& shape_t = ctx->input(0);
+
+    OP_REQUIRES(ctx, shape_t.dtype() == DT_INT32,
+      errors::InvalidArgument(
+          "Bad size input type for SetOutputToSizedImage: Expected DT_INT32 "
+          "but got ",
+          DataTypeString(shape_t.dtype())));
     OP_REQUIRES(ctx, shape_t.dims() == 1,
                   errors::InvalidArgument("output shape must be 1-dimensional",
                                           shape_t.shape().DebugString()));
     OP_REQUIRES(ctx, shape_t.NumElements() == 2,
                   errors::InvalidArgument("output shape must have two elements",
                                           shape_t.shape().DebugString()));
-    auto shape_vec = shape_t.vec<int32>();
-    int32 out_height = shape_vec(0);
-    int32 out_width = shape_vec(1);
 
+    auto shape_vec = shape_t.flat<int32>();                    
+    auto out_height = shape_vec(0);
+    auto out_width = shape_vec(1);
     Tensor *output;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,
@@ -93,6 +100,7 @@ typedef Eigen::GpuDevice GPUDevice;
 #define REGISTER(TYPE)                                              \
   REGISTER_KERNEL_BUILDER(Name("IndexInitializer") \
                               .Device(DEVICE_GPU)                   \
+                              .HostMemory("output_shape")            \
                               .TypeConstraint<TYPE>("dtype"),        \
                           IndexInitializerOp<GPUDevice, TYPE>)
 

@@ -129,21 +129,32 @@ REGISTER_OP("IndexInitializer")
     .Attr("dtype: {float32}")
     .Output("output: dtype")
     .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle input;
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 2, &input));
-        // TODO(petewarden) - Remove once we have constant evaluation in C++ only.
+      // Verify shape of size input.
+      ShapeHandle size;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &size));
+      DimensionHandle unused;
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(size, 0), 2, &unused));
 
+      // Get size values from the size tensor.
       const Tensor *size_tensor = c->input_tensor(0);
-      if (size_tensor->dtype() != DT_INT32) {
-        return errors::InvalidArgument(
-            "Bad size input type for SetOutputToSizedImage: Expected DT_INT32 "
-            "but got ",
-            DataTypeString(size_tensor->dtype()), " for input #", 0,
-            " in ", c->DebugString());
+      DimensionHandle width;
+      DimensionHandle height;
+      if (size_tensor == nullptr) {
+        width = c->UnknownDim();
+        height = c->UnknownDim();
+      } else {
+        // TODO(petewarden) - Remove once we have constant evaluation in C++ only.
+        if (size_tensor->dtype() != DT_INT32) {
+          return errors::InvalidArgument(
+              "Bad size input type for SetOutputToSizedImage: Expected DT_INT32 "
+              "but got ",
+              DataTypeString(size_tensor->dtype()), " for input #", 0,
+              " in ", c->DebugString());
+        }
+        auto vec = size_tensor->vec<int32>();
+        height = c->MakeDim(vec(0));
+        width = c->MakeDim(vec(1));
       }
-      auto vec = size_tensor->vec<int32>();
-      DimensionHandle height = c->MakeDim(vec(0));
-      DimensionHandle width = c->MakeDim(vec(1));
 
       c->set_output(0, c->MakeShape({height, width, 3}));
       return Status::OK();
