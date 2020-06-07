@@ -75,7 +75,8 @@ function main() {
   echo $(date) : "=== Building wheel"
 
 
-  BUILD_CMD="setup.py bdist_wheel --platlib-patch"
+  # BUILD_CMD="setup.py bdist_wheel --platlib-patch"
+  BUILD_CMD="setup.py bdist_wheel"
   if is_macos; then
     BUILD_CMD="${BUILD_CMD} --plat-name macosx_10_13_x86_64"
   fi
