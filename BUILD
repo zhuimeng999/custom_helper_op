@@ -6,6 +6,6 @@ sh_binary(
         "MANIFEST.in",
         "requirements.txt",
         "setup.py",
-        "//tensorflow_cost_volume",
+        "//custom_helper_op",
     ],
 )

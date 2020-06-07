@@ -68,7 +68,7 @@ function main() {
     start robocopy //S "${from}" "${to}" //xf *_test.py
     sleep 5
   else
-    rsync -avm -L --exclude='*_test.py' ${PIP_FILE_PREFIX}tensorflow_cost_volume "${TMPDIR}"
+    rsync -avm -L --exclude='*_test.py' ${PIP_FILE_PREFIX}custom_helper_op "${TMPDIR}"
   fi
 
   pushd ${TMPDIR}

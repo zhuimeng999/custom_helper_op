@@ -1,2 +1,2 @@
-recursive-include tensorflow_cost_volume *.so
+recursive-include custom_helper_op *.so
 include docs/*

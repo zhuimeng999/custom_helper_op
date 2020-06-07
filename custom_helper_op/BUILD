@@ -1,7 +1,7 @@
 licenses(["notice"])  # Apache 2.0
 
 package(default_visibility = ["//visibility:public"])
-load(":tensorflow_cost_volume.bzl", "custom_op_library")
+load(":custom_helper_op.bzl", "custom_op_library")
 
 config_setting(
     name = "windows",
@@ -22,7 +22,7 @@ custom_op_library(
 )
 
 py_library(
-    name = "tensorflow_cost_volume",
+    name = "custom_helper_op",
     srcs = glob(["**/*.py"], exclude = ["python/ops/*_test.py"]),
     data = [
         ":_cost_volume.so"
@@ -37,7 +37,7 @@ py_test(
     ],
     main = "python/ops/cost_volume_ops_test.py",
     deps = [
-        ":tensorflow_cost_volume",
+        ":custom_helper_op",
     ],
     srcs_version = "PY2AND3",
 )

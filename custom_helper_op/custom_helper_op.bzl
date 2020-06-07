@@ -37,7 +37,7 @@ def custom_op_library(
         deps = deps + if_cuda_is_configured([":" + basename + "_gpu"])
 
     copts = copts + select({
-        "//tensorflow_cost_volume:windows": [
+        "//custom_helper_op:windows": [
             "/DEIGEN_STRONG_INLINE=inline",
             "-DTENSORFLOW_MONOLITHIC_BUILD",
             "/D_USE_MATH_DEFINES",
@@ -60,7 +60,7 @@ def custom_op_library(
         copts = copts,
         linkshared = 1,
         features = select({
-            "//tensorflow_cost_volume:windows": ["windows_export_all_symbols"],
+            "//custom_helper_op:windows": ["windows_export_all_symbols"],
             "//conditions:default": [],
         }),
         deps = deps,

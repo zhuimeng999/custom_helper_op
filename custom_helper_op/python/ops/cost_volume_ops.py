@@ -20,7 +20,7 @@ from __future__ import print_function
 import os
 from tensorflow.python.framework import load_library
 from tensorflow.python.platform import resource_loader
-from tensorflow_cost_volume.python.utils.path_helper import package_root
+from custom_helper_op.python.utils.path_helper import package_root
 import tensorflow as tf
 
 cost_volume_ops = load_library.load_op_library(

@@ -23,7 +23,7 @@ limitations under the License.
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/platform/types.h"
-#include "tensorflow_cost_volume/cc/kernels/cost_volume.h"
+#include "custom_helper_op/cc/kernels/cost_volume.h"
 
 namespace tensorflow {
 namespace addons {

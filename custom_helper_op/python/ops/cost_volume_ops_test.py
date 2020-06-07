@@ -21,7 +21,7 @@ import numpy as np
 import cv2
 from tensorflow.python.platform import test
 from tensorflow.python.framework import test_util
-from tensorflow_cost_volume import cost_volume
+from custom_helper_op import cost_volume
 import tensorflow as tf
 
 def getIdentifiy(shape):
