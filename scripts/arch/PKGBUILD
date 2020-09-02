@@ -1,0 +1,56 @@
+# Maintainer: piernov <piernov@piernov.org>
+
+pkgname=python-tensorflow-custom-helper-op
+pkgver=v0.1.0
+pkgrel=1
+pkgdesc="custom helper function"
+url="https://github.com/zhuimeng999/custom_helper_op"
+arch=('any')
+license=('APACHE')
+depends=('tensorflow-cuda' 'python-tensorflow' 'python-typeguard' 'cuda' 'cudnn')
+makedepends=('python-setuptools' 'bazel' 'rsync' 'python-pip')
+# source=("git+git@github.com:zhuimeng999/custom_helper_op.git")
+# sha256sums=('SKIP')
+
+# pkgver() {
+#   cd addons
+#   printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+# }
+
+prepare() {
+  export GCC_HOST_COMPILER_PATH=/usr/bin/gcc-9
+  export HOST_CXX_COMPILER_PATH=/usr/bin/gcc-9
+
+  # Force OpenJDK-11
+  export JAVA_HOME=/usr/lib/jvm/java-11-openjdk
+
+  export TF_NEED_CUDA=1
+  export TF_CUDA_CLANG=0
+  export CUDA_TOOLKIT_PATH=/opt/cuda
+  export CUDNN_INSTALL_PATH=/usr
+  export TF_CUDA_PATHS=/opt/cuda/targets/x86_64-linux
+
+  export TF_CUDA_VERSION=$(/opt/cuda/bin/nvcc --version | sed -n 's/^.*release \(.*\),.*/\1/p')
+  export TF_CUDNN_VERSION=$(sed -n 's/^#define CUDNN_MAJOR\s*\(.*\).*/\1/p' /usr/include/cudnn.h)
+  export TF_CUDA_COMPUTE_CAPABILITIES=3.5,3.7,5.0,5.2,5.3,6.0,6.1,6.2,7.0,7.2,7.5
+
+  rm -rf custom_helper_op
+  if [ -d "../../../custom_helper_op" ]
+  then
+    ln -sf ../../.. custom_helper_op
+  else
+    git clone git@github.com:zhuimeng999/custom_helper_op.git
+  fi
+}
+
+build() {
+  cd "${srcdir}"/custom_helper_op
+  python3 ./configure.py --no-deps
+  bazel build --copt=-O3 --copt=-march=native build_pip_pkg
+  bazel-bin/build_pip_pkg artifacts
+}
+
+package() {
+  cd "${srcdir}"/custom_helper_op
+  PIP_CONFIG_FILE=/dev/null pip install --isolated --root="$pkgdir" --ignore-installed --no-deps artifacts/custom_helper_op-*.whl
+}

@@ -2,3 +2,6 @@
 /artifacts
 /bazel-*
 /.bazelrc
+/scripts/arch/pkg/
+/scripts/arch/src/
+/scripts/arch/python-tensorflow-custom-helper-op-*-any.pkg.tar.zst
