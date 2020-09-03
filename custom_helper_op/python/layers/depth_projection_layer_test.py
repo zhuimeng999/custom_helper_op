@@ -41,7 +41,6 @@ class DepthProjectTest(test_util.parameterized.TestCase):
             true_feature[i, h, w, c] =f(true_index[i, h, w, 0], true_index[i, h, w, 1])
 
     predict_feature = dpl((input_feature, input_depth, input_project))
-    print(tf.shape(predict_feature))
     np.testing.assert_allclose(true_feature[:,1:-1, 1:-1, :], predict_feature.numpy()[:,1:-1, 1:-1, :], rtol=1e-5)
 
 if __name__ == '__main__':
