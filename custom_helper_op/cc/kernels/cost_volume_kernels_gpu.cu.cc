@@ -99,12 +99,10 @@ __global__ void CostVolumeKernel(const INDEX_TYPE virtual_thread,
       for(int cc = 0; cc < image_channels; cc++){
         out_channels[cc] = out_channels[cc]/used_sample;
       }
-
     } else {
       for(int cc = 0; cc < image_channels; cc++){
-        out_channels[cc] = 100;
+        out_channels[cc] = 0;
       }
-      out_mask_data[i] = T(0);
     }
   }
 }
@@ -172,7 +170,7 @@ __global__ void CostVolumeKernelNoBatch(const INDEX_TYPE virtual_thread,
       }
     } else {
       for(int cc = 0; cc < image_channels; cc++){
-        out_channels[cc] = 100;
+        out_channels[cc] = 0;
       }
     }
   }
