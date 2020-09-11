@@ -1,5 +1,4 @@
 #include "tensorflow/core/framework/op_kernel.h"
-#include <bit>
 
 void swap_endianess(uint32_t& ui)
 {
