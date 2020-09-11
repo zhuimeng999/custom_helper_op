@@ -46,6 +46,18 @@ def _cost_volume_grad(op, grad_out, grad_mask):
     return [image_grad, None]
 
 
+def decode_pfm(contents, name=None):
+    """
+    Decode a PNM-encoded image to a uint8 tensor.
+    Args:
+      contents: A `Tensor` of type `string`. 0-D.  The PNM-encoded image.
+      name: A name for the operation (optional).
+    Returns:
+      A `Tensor` of type `uint8` and shape of `[height, width, 4]` (RGBA).
+    """
+    return _custom_helper_ops.decode_pfm(contents, name=name)
+
+
 tf.no_gradient("CostVolumeGrad")
 
 class index_initializer(tf.initializers.Initializer):

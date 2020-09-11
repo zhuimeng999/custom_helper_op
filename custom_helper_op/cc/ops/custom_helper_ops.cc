@@ -169,5 +169,16 @@ REGISTER_OP("IndexInitializer")
     })
     .Doc(kIndexInitializerDoc);
 
+REGISTER_OP("DecodePfm")
+    .Input("input: string")
+    .Output("image: float")
+    .SetShapeFn([](shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle unused;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 0, &unused));
+      c->set_output(
+          0, c->MakeShape({c->UnknownDim(), c->UnknownDim(), 1}));
+      return Status::OK();
+    });
+
 }  // end namespace addons
 }  // namespace tensorflow
