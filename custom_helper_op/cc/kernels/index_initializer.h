@@ -11,7 +11,7 @@ namespace tensorflow {
 namespace custom_helper_op {
 namespace functor {
 
-template <typename Device, typename T>
+template <typename Device, typename T, bool half_centor>
 struct FillIndexFunctor {
 // Computes on device "d": out = out.constant(in(0)),
 void operator()(OpKernelContext* ctx, const Device& d, T *out_data,int32 out_height, int32 out_width);
@@ -19,8 +19,8 @@ void operator()(OpKernelContext* ctx, const Device& d, T *out_data,int32 out_hei
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T>
-struct FillIndexFunctor<Eigen::GpuDevice, T> {
+template <typename T, bool half_centor>
+struct FillIndexFunctor<Eigen::GpuDevice, T, half_centor> {
   void operator()(OpKernelContext* ctx, const Eigen::GpuDevice& d, T *out_data,int32 out_height, int32 out_width);
 };
 #endif

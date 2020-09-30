@@ -126,6 +126,7 @@ REGISTER_OP("CostVolumeGrad")
 // V2 op supports output_shape.
 REGISTER_OP("IndexInitializer")
     .Input("output_shape: int32")
+    .Attr("half_centor: bool")
     .Attr("dtype: {float32}")
     .Output("output: dtype")
     .SetShapeFn([](InferenceContext* c) {
@@ -143,6 +144,7 @@ REGISTER_OP("IndexInitializer")
       if (size_tensor == nullptr) {
         width = c->UnknownDim();
         height = c->UnknownDim();
+        channels = c->MakeDim(3);
       } else {
         // TODO(petewarden) - Remove once we have constant evaluation in C++ only.
         if (size_tensor->dtype() != DT_INT32) {

@@ -60,8 +60,11 @@ def decode_pfm(contents, name=None):
 
 tf.no_gradient("CostVolumeGrad")
 
-class index_initializer(tf.initializers.Initializer):
-  def __call__(self, output_shape, dtype=tf.float32):
+def index_initializer(output_shape, half_centor=True, dtype=tf.float32):
+      return _custom_helper_ops.index_initializer(output_shape=output_shape, half_centor=half_centor, dtype=dtype)
+
+class IndexInitializer(tf.initializers.Initializer):
+  def __call__(self, output_shape, half_centor=True, dtype=tf.float32):
     """Returns a tensor object initialized as specified by the initializer.
 
     Args:
@@ -72,4 +75,4 @@ class index_initializer(tf.initializers.Initializer):
     Raises:
       ValuesError: If the dtype is not numeric or boolean.
     """
-    return _custom_helper_ops.index_initializer(output_shape=output_shape, dtype=dtype)
+    return _custom_helper_ops.index_initializer(output_shape=output_shape, half_centor=half_centor, dtype=dtype)

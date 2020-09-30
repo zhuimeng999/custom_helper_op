@@ -18,26 +18,26 @@ typedef Eigen::GpuDevice GPUDevice;
 // Zeroes count elements starting at ptr using all threads of a 1-D grid.
 // Note: this function does not synchronize, and therefore the memory range is
 // not guaranteed to be zero until the next kernel launch.
-template <typename T>
+template <typename T, bool half_centor>
 __global__ void SetToIndex(const int32 count, T* __restrict__ out_data, const int32 out_width) {
   for (const auto i : GpuGridRangeX<int32>(count)) {
     T *tmp = &out_data[i*3];
-    tmp[0] = T(i%out_width);
-    tmp[1] = T(i/out_width);
+    tmp[0] = T(i%out_width) + 0.5 * half_centor;
+    tmp[1] = T(i/out_width) + 0.5 * half_centor;;
     tmp[2] = T(1.0);
   }
 }
 
-template <typename T>
-void FillIndexFunctor<Eigen::GpuDevice, T>::operator()(OpKernelContext* ctx, const Eigen::GpuDevice& d, T *out_data,int32 out_height, int32 out_width)
+template <typename T, bool half_centor>
+void FillIndexFunctor<Eigen::GpuDevice, T, half_centor>::operator()(OpKernelContext* ctx, const Eigen::GpuDevice& d, T *out_data,int32 out_height, int32 out_width)
 {
   auto total_elm = out_height*out_width;
-  auto config = GetGpuLaunchConfig(total_elm, d, SetToIndex<T>, 0, 0);
-  SetToIndex<T><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_elm, out_data, out_width);  
+  auto config = GetGpuLaunchConfig(total_elm, d, SetToIndex<T, half_centor>, 0, 0);
+  SetToIndex<T, half_centor><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_elm, out_data, out_width);  
 };
 
-template struct FillIndexFunctor<GPUDevice, float>;
-
+template struct FillIndexFunctor<GPUDevice, float, true>;
+template struct FillIndexFunctor<GPUDevice, float, false>;
 } /* functor */
 } /* custom_helper_op */
 } /* tensorflow */

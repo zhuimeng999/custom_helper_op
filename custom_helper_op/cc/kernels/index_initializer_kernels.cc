@@ -18,15 +18,15 @@ namespace custom_helper_op {
 
 namespace functor {
 
-template <typename T>
-struct FillIndexFunctor<Eigen::ThreadPoolDevice, T> {
+template <typename T, bool half_centor>
+struct FillIndexFunctor<Eigen::ThreadPoolDevice, T, half_centor> {
   void operator()(OpKernelContext* ctx, const Eigen::ThreadPoolDevice& d, T *out_data,int32 out_height, int32 out_width)
 {
     auto initializer_function = [&](const int start, const int limit) {
       for (int i = start; i < limit; ++i) {
         T *tmp = &out_data[i*3];
-        tmp[0] = T(i%out_width);
-        tmp[1] = T(i/out_width);
+        tmp[0] = T(i%out_width) + 0.5*half_centor;
+        tmp[1] = T(i/out_width) + 0.5*half_centor;
         tmp[2] = T(1.0);
       }
     };
@@ -40,16 +40,20 @@ struct FillIndexFunctor<Eigen::ThreadPoolDevice, T> {
     thread_pool->ParallelFor(total_elm, schedulingParams, initializer_function);
 }
 };
-template struct FillIndexFunctor<Eigen::ThreadPoolDevice, float>;
+template struct FillIndexFunctor<Eigen::ThreadPoolDevice, float, true>;
+template struct FillIndexFunctor<Eigen::ThreadPoolDevice, float, false>;
 } /* functor */
 
 using functor::FillIndexFunctor;
 
 template <typename Device, typename T>
 class IndexInitializerOp : public OpKernel {
+ private:
+  bool half_centor_;
  public:
   explicit IndexInitializerOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("half_centor", &half_centor_));
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -82,9 +86,13 @@ class IndexInitializerOp : public OpKernel {
                             &output));
 
 
-    FillIndexFunctor<Device, T>()(ctx, 
+    if(half_centor_){
+      FillIndexFunctor<Device, T, true>()(ctx, 
           ctx->eigen_device<Device>(), output->tensor<T, 3>().data(), out_height, out_width);
-
+    } else {
+      FillIndexFunctor<Device, T, false>()(ctx, 
+          ctx->eigen_device<Device>(), output->tensor<T, 3>().data(), out_height, out_width);
+    }
   }
 };
 
