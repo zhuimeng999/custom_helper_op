@@ -319,7 +319,7 @@ __global__ void CostVolumeGradKernel(const INDEX_TYPE virtual_thread,
         T *src_out_channels_fc = &src_out_channels_ff[image_channels];
         const T *src_channels_cc = &src_channels_fc[img_height_step];
         T *src_out_channels_cc = &src_out_channels_fc[img_height_step];
-        const T *src_channels_cf = &src_out_channels_ff[img_height_step];
+        const T *src_channels_cf = &src_channels_ff[img_height_step];
         T *src_out_channels_cf = &src_out_channels_ff[img_height_step];
 
         for(int cc = 0; cc < image_channels; cc++){
@@ -389,7 +389,7 @@ __global__ void CostVolumeGradKernelNoBatch(const INDEX_TYPE virtual_thread,
         const T *src_channels_cc = &src_channels_fc[img_height_step];
         T *src_out_channels_cc = &src_out_channels_fc[img_height_step];
         const T *src_channels_cf = &src_channels_ff[img_height_step];
-        T *src_out_channels_cf = &src_channels_ff[img_height_step];
+        T *src_out_channels_cf = &src_out_channels_ff[img_height_step];
 
         for(int cc = 0; cc < image_channels; cc++){
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
