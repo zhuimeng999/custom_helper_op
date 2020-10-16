@@ -14,15 +14,24 @@ custom_op_library(
         "cc/kernels/cost_volume_kernels.cc",
         "cc/kernels/cost_volume.h",
 
+        "cc/kernels/deformable_conv_op.cc",
+        "cc/kernels/deformable_conv_op.h",
+        "cc/kernels/deformable_conv2d_utils.h",
+
         "cc/kernels/index_initializer_kernels.cc",
         "cc/kernels/index_initializer.h",
 
         "cc/kernels/pfm_decoder_kernels.cc",
+
         "cc/ops/custom_helper_ops.cc",
+        "cc/ops/deformable_conv2d.cc"
     ],
     cuda_srcs = [
         "cc/kernels/cost_volume.h",
         "cc/kernels/cost_volume_kernels_gpu.cu.cc",
+
+        "cc/kernels/deformable_conv_op_gpu.cu.cc",
+        "cc/kernels/deformable_conv_op.h",
 
         "cc/kernels/index_initializer.h",
         "cc/kernels/index_initializer_kernels_gpu.cu.cc",
@@ -81,6 +90,18 @@ py_test(
         "python/layers/depth_projection_layer_test.py"
     ],
     main = "python/layers/depth_projection_layer_test.py",
+    deps = [
+        ":custom_helper_op",
+    ],
+    srcs_version = "PY2AND3",
+)
+
+py_test(
+    name = "deformable_conv2d_py_test",
+    srcs = [
+        "python/layers/deformable_conv2d_test.py"
+    ],
+    main = "python/layers/deformable_conv2d_test.py",
     deps = [
         ":custom_helper_op",
     ],

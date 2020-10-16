@@ -18,3 +18,7 @@ from __future__ import absolute_import
 
 from custom_helper_op.python.ops.custom_helper_ops import cost_volume, index_initializer, decode_pfm, IndexInitializer
 from custom_helper_op.python.layers.custom_layers import DepthProjectLayer
+from custom_helper_op.python.layers.deformable_conv2d import (
+    DeformableConv2D,
+    DeformablePSROIAlign,
+)
