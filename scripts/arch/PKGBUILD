@@ -18,9 +18,6 @@ makedepends=('python-setuptools' 'bazel' 'rsync' 'python-pip')
 # }
 
 prepare() {
-  export GCC_HOST_COMPILER_PATH=/usr/bin/gcc-9
-  export HOST_CXX_COMPILER_PATH=/usr/bin/gcc-9
-
   # Force OpenJDK-11
   export JAVA_HOME=/usr/lib/jvm/java-11-openjdk
 
