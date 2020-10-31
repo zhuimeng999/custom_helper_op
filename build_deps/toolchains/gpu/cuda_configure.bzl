@@ -529,7 +529,7 @@ def _find_cuda_lib(
     return find_lib(
         repository_ctx,
         ["%s/%s" % (basedir, file_name)],
-        check_soname = version and not static,
+        check_soname = False,
     )
 
 def _find_libs(repository_ctx, cuda_config):

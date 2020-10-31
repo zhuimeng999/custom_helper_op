@@ -34,14 +34,46 @@ namespace functor {
 
 template <typename Device, typename T>
 struct CostAggregateFunctor {
-  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor *output_mask);
+  void operator()(const Device& dev, 
+              const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              T* cost_data,
+              int32* cost_mask_data);
 };
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
 template <typename T>
 struct CostAggregateFunctor<Eigen::GpuDevice, T> {
-  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor *output_mask);
+  void operator()(const Eigen::GpuDevice& dev, 
+               const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              T* cost_data,
+              int32* cost_mask_data);
 };
 #endif
 
