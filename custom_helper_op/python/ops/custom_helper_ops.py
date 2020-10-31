@@ -45,6 +45,22 @@ def _cost_volume_grad(op, grad_out, grad_mask):
     image_grad = _custom_helper_ops.cost_volume_grad(images=images_tensor, transforms=transforms_tensor, transformed_mask=transformed_mask, grad=grad_output_tensor, interpolation='BILINEAR')
     return [image_grad, None]
 
+@tf.function
+def cost_aggregate(images, transforms, name=None):
+    with tf.name_scope(name or "cost_aggregate"):
+        images_tensor = tf.convert_to_tensor(images, name="data")
+        transforms_tensor = tf.convert_to_tensor(transforms, name="warp")
+        return _custom_helper_ops.cost_aggregate(images=images_tensor, transforms=transforms_tensor, interpolation='BILINEAR')
+
+
+@tf.RegisterGradient("cost_aggregate")
+def _cost_aggregate_grad(op, grad_out, grad_mask):
+    images_tensor, transforms_tensor = op.inputs
+    _, transformed_mask = op.outputs
+    grad_output_tensor = tf.convert_to_tensor(grad_out, name="grad_output")
+    image_grad = _custom_helper_ops.cost_aggregate_grad(images=images_tensor, transforms=transforms_tensor, transformed_mask=transformed_mask, grad=grad_output_tensor, interpolation='BILINEAR')
+    return [image_grad, None]
+
 
 def decode_pfm(contents, name=None):
     """
