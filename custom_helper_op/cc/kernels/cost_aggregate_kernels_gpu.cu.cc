@@ -70,18 +70,17 @@ __global__ void CostAggregateKernel(const INDEX_TYPE virtual_thread,
     int32 used_sample = 0;
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
       const T *R = &Rs_data[(b*src_image_num + n)*9];
-      const T *t = &Rs_data[(b*src_image_num + n)*3];
-      T src_w = R[0] * ref_w + R[3] * ref_h + R[6] * depth + t[0];
-      T src_h = R[1] * ref_w + R[4] * ref_h + R[7] * depth + t[1];
-      T src_z = R[2] * ref_w + R[5] * ref_h + R[8] * depth + t[2];
-      if(src_z == 0.0f){
+      const T *t = &Ts_data[(b*src_image_num + n)*3];
+
+      T src_z = R[6] * ref_w + R[7] * ref_h + R[8] * depth + t[2];
+      if(src_z <= 0.0f){
         continue;
       }
-      src_w = src_w/src_z;
-      src_h = src_h/src_z;
+      T src_w = (R[0] * ref_w + R[1] * ref_h + R[2] * depth + t[0])/src_z;
+      T src_h = (R[3] * ref_w + R[4] * ref_h + R[5] * depth + t[1])/src_z;
 
-      if (src_h > 0.0f && src_w > 0.0f &&
-        src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
+      if (src_h >= 0.0f && src_w >= 0.0f &&
+        src_h <= static_cast<T>(src_image_height - 1) && src_w <= static_cast<T>(src_image_width - 1)) {
         const INDEX_TYPE fh = static_cast<INDEX_TYPE>(src_h);
         const INDEX_TYPE fw = static_cast<INDEX_TYPE>(src_w);
         const T dh = src_h - fh;
