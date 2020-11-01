@@ -27,11 +27,10 @@ namespace tensorflow {
 namespace custom_helper_op {
 
 namespace functor {
-
 // Explicit instantiation of the GPU functor.
 typedef Eigen::GpuDevice GPUDevice;
 
-template <typename T, typename INDEX_TYPE>
+template <typename T, typename INDEX_TYPE, COST_REDUCE_METHOD reduce_method>
 __global__ void CostAggregateKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
@@ -67,7 +66,7 @@ __global__ void CostAggregateKernel(const INDEX_TYPE virtual_thread,
     const T ref_h = h*depth;
 
     T cost = T(0.);
-    int32 used_sample = 0;
+    int32 used_sample = (reduce_method == COST_REDUCE_MEAN?0:-1);
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
@@ -95,18 +94,32 @@ __global__ void CostAggregateKernel(const INDEX_TYPE virtual_thread,
         const T *src_channels_cc = &src_channels_fc[src_image_height_step];
         const T *src_channels_cf = &src_channels_ff[src_image_height_step];
 
+        T curr_cost = T(0.);
         for(int cc = 0; cc < image_channels; cc++){
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
                                   coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
           T diff = src_sample - ref_channels[cc];
-          cost += diff*diff;
+          curr_cost += diff*diff;
         }
-        used_sample = used_sample + 1;
+
+        if(reduce_method == COST_REDUCE_MEAN){
+          cost += curr_cost;
+          used_sample = used_sample + 1;
+        } else {
+          if(cost > curr_cost){
+            cost = curr_cost;
+            used_sample = n;
+          }
+        }
       }
     }
     cost_mask_data[i] = used_sample;
     if(used_sample > 0){
-      cost_data[i] = cost/static_cast<T>(used_sample*image_channels);
+      if(reduce_method == COST_REDUCE_MEAN){
+        cost_data[i] = cost/static_cast<T>(used_sample*image_channels);
+      } else {
+        cost_data[i] = cost/static_cast<T>(image_channels);
+      }
     } else {
       cost_data[i] = T(0);
     }
@@ -155,8 +168,8 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
 }
 
 // Define the GPU implementation that launches the CUDA kernel.
-template <typename T>
-void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
+template <typename T, COST_REDUCE_METHOD reduce_method>
+void CostAggregateFunctor<Eigen::GpuDevice, T, reduce_method>::operator()(
     const GPUDevice& dev, 
               const int64 batch_size, 
               const int64 image_height, 
@@ -179,8 +192,8 @@ void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
     const auto input_ref_size = batch_size * image_height * image_width * image_channels;
     const auto input_src_size = batch_size * src_image_num * src_image_height * src_image_width * image_channels;
     if((input_ref_size > INT32_MAX) || (input_src_size > INT32_MAX) || (loop_count > INT32_MAX)){
-      auto config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateKernel<T, int64>, 0, 0);
-      CostAggregateKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+      auto config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateKernel<T, int64, reduce_method>, 0, 0);
+      CostAggregateKernel<T, int64, reduce_method><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                 loop_count,
                                 batch_size, 
                                 image_height, 
@@ -199,8 +212,8 @@ void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
                                 cost_data,
                                 cost_mask_data);
     } else {
-      auto config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateKernel<T, int32>, 0, 0);
-      CostAggregateKernel<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+      auto config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateKernel<T, int32, reduce_method>, 0, 0);
+      CostAggregateKernel<T, int32, reduce_method><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                 loop_count,
                                 batch_size, 
                                 image_height, 
@@ -221,10 +234,12 @@ void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
     }
 }
 
-template struct CostAggregateFunctor<GPUDevice, float>;
-template struct CostAggregateFunctor<GPUDevice, double>;
+template struct CostAggregateFunctor<GPUDevice, float, COST_REDUCE_MEAN>;
+template struct CostAggregateFunctor<GPUDevice, float, COST_REDUCE_MIN>;
+template struct CostAggregateFunctor<GPUDevice, double, COST_REDUCE_MEAN>;
+template struct CostAggregateFunctor<GPUDevice, double, COST_REDUCE_MIN>;
 
-template <typename T, typename INDEX_TYPE>
+template <typename T, typename INDEX_TYPE, COST_REDUCE_METHOD reduce_method>
 __global__ void CostAggregateGradKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
@@ -249,7 +264,7 @@ __global__ void CostAggregateGradKernel(const INDEX_TYPE virtual_thread,
   const auto src_image_height_step = src_image_width * image_channels;
   
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
-    if(cost_mask_data[i] == 0){
+    if(cost_mask_data[i] <= 0){
       continue;
     }
     const auto batch_step = i/image_depth;
@@ -268,7 +283,7 @@ __global__ void CostAggregateGradKernel(const INDEX_TYPE virtual_thread,
     T cost_grad = cost_grad_data[i]/static_cast<T>(cost_mask_data[i]*static_cast<int32>(image_channels));
 
     T depth_grad = T(0);
-    for(INDEX_TYPE n = 0; n < src_image_num; n++){
+    for(INDEX_TYPE n = (reduce_method == COST_REDUCE_MEAN?0:cost_mask_data[i]); n < (reduce_method == COST_REDUCE_MEAN?src_image_num:(cost_mask_data[i] + 1)); n++){
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
@@ -341,8 +356,8 @@ __global__ void SetZeroBig(const INDEX_TYPE count, T* __restrict__ ptr) {
   }
 }
 // Define the GPU implementation that launches the CUDA kernel.
-template <typename T>
-void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
+template <typename T, COST_REDUCE_METHOD reduce_method>
+void CostAggregateGradFunctor<Eigen::GpuDevice, T, reduce_method>::operator()(
     const GPUDevice& dev, 
               const int64 batch_size, 
               const int64 image_height, 
@@ -377,8 +392,8 @@ void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
       config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int64>, 0, 0);
       SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
 
-      config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateGradKernel<T, int64>, 0, 0);
-      CostAggregateGradKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+      config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateGradKernel<T, int64, reduce_method>, 0, 0);
+      CostAggregateGradKernel<T, int64, reduce_method><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                 loop_count,
                                 batch_size, 
                                 image_height, 
@@ -407,8 +422,8 @@ void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
       config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int32>, 0, 0);
       SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
 
-      config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateGradKernel<T, int32>, 0, 0);
-      CostAggregateGradKernel<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+      config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateGradKernel<T, int32, reduce_method>, 0, 0);
+      CostAggregateGradKernel<T, int32, reduce_method><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                 loop_count,
                                 batch_size, 
                                 image_height, 
@@ -432,8 +447,10 @@ void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
     }
 }
 
-template struct CostAggregateGradFunctor<GPUDevice, float>;
-template struct CostAggregateGradFunctor<GPUDevice, double>;
+template struct CostAggregateGradFunctor<GPUDevice, float, COST_REDUCE_MEAN>;
+template struct CostAggregateGradFunctor<GPUDevice, float, COST_REDUCE_MIN>;
+template struct CostAggregateGradFunctor<GPUDevice, double, COST_REDUCE_MEAN>;
+template struct CostAggregateGradFunctor<GPUDevice, double, COST_REDUCE_MIN>;
 
 }  // end namespace functor
 

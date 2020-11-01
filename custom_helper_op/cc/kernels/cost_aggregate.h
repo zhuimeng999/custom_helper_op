@@ -32,7 +32,9 @@ namespace custom_helper_op {
 // some Eigen device code.
 namespace functor {
 
-template <typename Device, typename T>
+enum COST_REDUCE_METHOD { COST_REDUCE_MEAN, COST_REDUCE_MIN };
+
+template <typename Device, typename T, COST_REDUCE_METHOD reduce_method>
 struct CostAggregateFunctor {
   void operator()(const Device& dev, 
               const int64 batch_size, 
@@ -55,8 +57,8 @@ struct CostAggregateFunctor {
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T>
-struct CostAggregateFunctor<Eigen::GpuDevice, T> {
+template <typename T, COST_REDUCE_METHOD reduce_method>
+struct CostAggregateFunctor<Eigen::GpuDevice, T, reduce_method> {
   void operator()(const Eigen::GpuDevice& dev, 
                const int64 batch_size, 
               const int64 image_height, 
@@ -77,7 +79,7 @@ struct CostAggregateFunctor<Eigen::GpuDevice, T> {
 };
 #endif
 
-template <typename Device, typename T>
+template <typename Device, typename T, COST_REDUCE_METHOD reduce_method>
 struct CostAggregateGradFunctor {
   void operator()(    const Device& dev, 
               const int64 batch_size, 
@@ -104,8 +106,8 @@ struct CostAggregateGradFunctor {
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T>
-struct CostAggregateGradFunctor<Eigen::GpuDevice, T> {
+template <typename T, COST_REDUCE_METHOD reduce_method>
+struct CostAggregateGradFunctor<Eigen::GpuDevice, T, reduce_method> {
   void operator()(    const Eigen::GpuDevice& dev, 
               const int64 batch_size, 
               const int64 image_height, 

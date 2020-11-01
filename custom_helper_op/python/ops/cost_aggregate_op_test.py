@@ -158,7 +158,7 @@ def build_sampler_coordinate(R, T, base_plane, offsets):
     return sample_coodinate, grid, tmp
 
 
-def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts):
+def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts, reduce_method="MEAN"):
     image_shape = tf.shape(ref_image)[1:3]
     max_d = tf.shape(offsets)[1]
     src_num = tf.shape(src_images)[1]
@@ -167,25 +167,30 @@ def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts):
     maped_feature_volume = tfa.image.resampler(tf.reshape(src_images, (-1, image_shape[0], image_shape[1], 3)), sample_coordinate)
     maped_feature_volume = tf.reshape(maped_feature_volume,
                                         (-1, src_num, image_shape[0], image_shape[1], max_d, 3))
-    cost = tf.reduce_mean(tf.square(maped_feature_volume - ref_image[:, None, :, :, None, :]), axis=(1, -1))
+    if reduce_method == "MEAN":
+      cost = tf.reduce_mean(tf.square(maped_feature_volume - ref_image[:, None, :, :, None, :]), axis=(1, -1))
+    else:
+      cost = tf.reduce_min(tf.reduce_sum(tf.square(maped_feature_volume - ref_image[:, None, :, :, None, :]), axis=-1), axis=1)
 
     return cost, sample_coordinate1, grid, coordinate
 
-@tf.function
-def test_check(*args):
-    cost, *_ = cost_aggregate(*args)
-    return tf.reduce_sum(cost)
-
 class MyOperatorTest(test_util.parameterized.TestCase):
   @test_util.parameterized.parameters(
-    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':10},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':11},
-    {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':13, 'IMAGE_DEPTH':4}
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':11, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':13, 'IMAGE_DEPTH':4, "reduce_method": "MEAN"},
+
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MIN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':10, "reduce_method": "MIN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':11, "reduce_method": "MIN"},
+    {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':13, 'IMAGE_DEPTH':4, "reduce_method": "MIN"}
   )
-  def testCostAggregate(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256):
+  def testCostAggregate(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256, reduce_method= "MEAN"):
     mvs_input_list = get_blendedmvs_samples("/home/lucius/data/datasets/mvsnet/dataset_low_res")
     np.random.shuffle(mvs_input_list)
     for i in range(10):
@@ -228,11 +233,11 @@ class MyOperatorTest(test_util.parameterized.TestCase):
       batch_Ts = tf.squeeze(tf.cast(tf.stack(batch_Ts, axis=0), tf.float64), axis=-1)
 
       start = time.time()
-      cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts)
+      cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
       cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
       base_time = time.time() - start
       start = time.time()
-      cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts)
+      cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
       cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
       tfa_time = time.time() - start
 
@@ -246,14 +251,19 @@ class MyOperatorTest(test_util.parameterized.TestCase):
 
 
   @test_util.parameterized.parameters(
-    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
-    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4},
-    # {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5},
-    # {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4},
-    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':3}
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':3, "reduce_method": "MEAN"}
   )
-  def testCostAggregateGradDataset(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256):
+  def testCostAggregateGradDataset(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256, reduce_method= "MEAN"):
+    @tf.function
+    def test_check(*args):
+        cost, *_ = cost_aggregate(*args, reduce_method=reduce_method)
+        return tf.reduce_sum(cost)
+
     mvs_input_list = get_blendedmvs_samples("/home/lucius/data/datasets/mvsnet/dataset_low_res")
     np.random.shuffle(mvs_input_list)
     for i in range(10):
@@ -302,20 +312,31 @@ class MyOperatorTest(test_util.parameterized.TestCase):
       np.testing.assert_almost_equal(theoretical[2][..., 1:-1, 1:-1] , numerical[2][..., 1:-1, 1:-1])
 
   @test_util.parameterized.parameters(
-    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':5},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':9},
-    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':10},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':6},
-    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13}
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':6, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':5, "reduce_method": "MIN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':10, "reduce_method": "MIN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
+    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
   )
-  def testCostAggregateGrad(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4):
+  def testCostAggregateGrad(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN"):
     batch_ref_image = np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
     batch_src_images = np.random.random([BATCH_SIZE, IMAGE_NUM, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
     batch_ref_depth = (np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]) + 2)*10
     batch_offsets = np.random.random([BATCH_SIZE, IMAGE_DEPTH])*4 - 2
     batch_Rs = np.tile(np.diagflat([1., 1., 1.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
     batch_Ts = np.tile(np.array([0., 0., 0.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
+
+    @tf.function
+    def test_check(*args):
+        cost, *_ = cost_aggregate(*args, reduce_method=reduce_method)
+        return tf.reduce_sum(cost)
 
     theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
     np.testing.assert_almost_equal(theoretical[0][..., 1:-1, 1:-1] , numerical[0][..., 1:-1, 1:-1])

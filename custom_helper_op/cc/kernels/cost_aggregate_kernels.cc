@@ -28,14 +28,31 @@ limitations under the License.
 namespace tensorflow {
 namespace custom_helper_op {
 
+using functor::COST_REDUCE_METHOD;
+using functor::COST_REDUCE_MEAN;
+using functor::COST_REDUCE_MIN;
+
 using functor::CostAggregateFunctor;
 using functor::CostAggregateGradFunctor;
 
 template <typename Device, typename T>
 class CostAggregateOp : public OpKernel {
+  private:
+  COST_REDUCE_METHOD reduce_method_;
+
  public:
   explicit CostAggregateOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
+    string reduce_method;
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("reduce_method", &reduce_method));
+    if (reduce_method == "MEAN") {
+      reduce_method_ = COST_REDUCE_MEAN;
+    } else if (reduce_method == "MIN") {
+      reduce_method_ = COST_REDUCE_MIN;
+    } else {
+      LOG(FATAL) << "Invalid reduce method " << reduce_method
+                 << ". Supported types: MEAN, MIN";
+    }
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -81,24 +98,45 @@ class CostAggregateOp : public OpKernel {
                             output_shape,
                             &cost_mask));
 
-    CostAggregateFunctor<Device, T>()(
-                                ctx->eigen_device<Device>(), 
-                                batch_size, 
-                                image_height, 
-                                image_width,
-                                image_channels,
-                                image_depth,
-                                src_image_num,
-                                src_images.dim_size(2), 
-                                src_images.dim_size(3),
-                                ref_image.tensor<T, 4>().data(),
-                                src_images.tensor<T, 5>().data(), 
-                                base_plane.tensor<T, 4>().data(),
-                                offsets.tensor<T, 2>().data(),
-                                Rs.tensor<T, 4>().data(),
-                                Ts.tensor<T, 3>().data(),
-                                cost->tensor<T, 4>().data(),
-                                cost_mask->tensor<int32, 4>().data());
+    if(reduce_method_ == COST_REDUCE_MEAN){
+      CostAggregateFunctor<Device, T, COST_REDUCE_MEAN>()(
+                                  ctx->eigen_device<Device>(), 
+                                  batch_size, 
+                                  image_height, 
+                                  image_width,
+                                  image_channels,
+                                  image_depth,
+                                  src_image_num,
+                                  src_images.dim_size(2), 
+                                  src_images.dim_size(3),
+                                  ref_image.tensor<T, 4>().data(),
+                                  src_images.tensor<T, 5>().data(), 
+                                  base_plane.tensor<T, 4>().data(),
+                                  offsets.tensor<T, 2>().data(),
+                                  Rs.tensor<T, 4>().data(),
+                                  Ts.tensor<T, 3>().data(),
+                                  cost->tensor<T, 4>().data(),
+                                  cost_mask->tensor<int32, 4>().data());
+    } else {
+      CostAggregateFunctor<Device, T, COST_REDUCE_MIN>()(
+                                  ctx->eigen_device<Device>(), 
+                                  batch_size, 
+                                  image_height, 
+                                  image_width,
+                                  image_channels,
+                                  image_depth,
+                                  src_image_num,
+                                  src_images.dim_size(2), 
+                                  src_images.dim_size(3),
+                                  ref_image.tensor<T, 4>().data(),
+                                  src_images.tensor<T, 5>().data(), 
+                                  base_plane.tensor<T, 4>().data(),
+                                  offsets.tensor<T, 2>().data(),
+                                  Rs.tensor<T, 4>().data(),
+                                  Ts.tensor<T, 3>().data(),
+                                  cost->tensor<T, 4>().data(),
+                                  cost_mask->tensor<int32, 4>().data());
+    }
 
   }
 private:
@@ -125,9 +163,21 @@ TF_CALL_double(REGISTER);
 
 template <typename Device, typename T>
 class CostAggregateGradOp : public OpKernel {
+private:
+ COST_REDUCE_METHOD reduce_method_;
  public:
   explicit CostAggregateGradOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
+    string reduce_method;
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("reduce_method", &reduce_method));
+    if (reduce_method == "MEAN") {
+      reduce_method_ = COST_REDUCE_MEAN;
+    } else if (reduce_method == "MIN") {
+      reduce_method_ = COST_REDUCE_MIN;
+    } else {
+      LOG(FATAL) << "Invalid reduce method " << reduce_method
+                 << ". Supported types: MEAN, MIN";
+    }
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -182,27 +232,51 @@ class CostAggregateGradOp : public OpKernel {
                             base_plane.shape(),
                             &base_plane_grad));                           
 
-    CostAggregateGradFunctor<Device, T>()(
-                                ctx->eigen_device<Device>(), 
-                                batch_size, 
-                                image_height, 
-                                image_width,
-                                image_channels,
-                                image_depth,
-                                src_image_num,
-                                src_images.dim_size(2), 
-                                src_images.dim_size(3),
-                                ref_image.tensor<T, 4>().data(),
-                                src_images.tensor<T, 5>().data(), 
-                                base_plane.tensor<T, 4>().data(),
-                                offsets.tensor<T, 2>().data(),
-                                Rs.tensor<T, 4>().data(),
-                                Ts.tensor<T, 3>().data(),
-                                cost_grad.tensor<T, 4>().data(),
-                                cost_mask.tensor<int32, 4>().data(),
-                                ref_image_grad->tensor<T, 4>().data(),
-                                src_images_grad->tensor<T, 5>().data(),
-                                base_plane_grad->tensor<T, 4>().data());
+    if(reduce_method_ == COST_REDUCE_MEAN){
+      CostAggregateGradFunctor<Device, T, COST_REDUCE_MEAN>()(
+                                  ctx->eigen_device<Device>(), 
+                                  batch_size, 
+                                  image_height, 
+                                  image_width,
+                                  image_channels,
+                                  image_depth,
+                                  src_image_num,
+                                  src_images.dim_size(2), 
+                                  src_images.dim_size(3),
+                                  ref_image.tensor<T, 4>().data(),
+                                  src_images.tensor<T, 5>().data(), 
+                                  base_plane.tensor<T, 4>().data(),
+                                  offsets.tensor<T, 2>().data(),
+                                  Rs.tensor<T, 4>().data(),
+                                  Ts.tensor<T, 3>().data(),
+                                  cost_grad.tensor<T, 4>().data(),
+                                  cost_mask.tensor<int32, 4>().data(),
+                                  ref_image_grad->tensor<T, 4>().data(),
+                                  src_images_grad->tensor<T, 5>().data(),
+                                  base_plane_grad->tensor<T, 4>().data());
+    } else {
+      CostAggregateGradFunctor<Device, T, COST_REDUCE_MIN>()(
+                                  ctx->eigen_device<Device>(), 
+                                  batch_size, 
+                                  image_height, 
+                                  image_width,
+                                  image_channels,
+                                  image_depth,
+                                  src_image_num,
+                                  src_images.dim_size(2), 
+                                  src_images.dim_size(3),
+                                  ref_image.tensor<T, 4>().data(),
+                                  src_images.tensor<T, 5>().data(), 
+                                  base_plane.tensor<T, 4>().data(),
+                                  offsets.tensor<T, 2>().data(),
+                                  Rs.tensor<T, 4>().data(),
+                                  Ts.tensor<T, 3>().data(),
+                                  cost_grad.tensor<T, 4>().data(),
+                                  cost_mask.tensor<int32, 4>().data(),
+                                  ref_image_grad->tensor<T, 4>().data(),
+                                  src_images_grad->tensor<T, 5>().data(),
+                                  base_plane_grad->tensor<T, 4>().data());
+    }
   }
 private:
   TF_DISALLOW_COPY_AND_ASSIGN(CostAggregateGradOp);
