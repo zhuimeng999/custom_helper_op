@@ -175,10 +175,10 @@ void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
               T* cost_data,
               int32* cost_mask_data
                                 ) {
-    const auto loop_count = batch_size * image_height *image_depth * image_width;
+    const auto loop_count = batch_size * image_height * image_width * image_depth;
     const auto input_ref_size = batch_size * image_height * image_width * image_channels;
     const auto input_src_size = batch_size * src_image_num * src_image_height * src_image_width * image_channels;
-    if((input_ref_size > INT32_MAX) || (input_src_size > INT32_MAX) || (input_src_size > INT32_MAX)){
+    if((input_ref_size > INT32_MAX) || (input_src_size > INT32_MAX) || (loop_count > INT32_MAX)){
       auto config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateKernel<T, int64>, 0, 0);
       CostAggregateKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                 loop_count,
@@ -222,51 +222,72 @@ void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
 }
 
 template struct CostAggregateFunctor<GPUDevice, float>;
+template struct CostAggregateFunctor<GPUDevice, double>;
 
 template <typename T, typename INDEX_TYPE>
 __global__ void CostAggregateGradKernel(const INDEX_TYPE virtual_thread, 
-              const INDEX_TYPE batch_size, const INDEX_TYPE image_height, const INDEX_TYPE image_width, 
-              const INDEX_TYPE image_depth, const INDEX_TYPE image_channels, const INDEX_TYPE image_num,
-              const T* images_data, const T* transforms_data, const T* transformed_mask_data, const T* grad_data, T* out_data){
-  const INDEX_TYPE img_height_step = image_width*image_channels;
-  const INDEX_TYPE img_step =  image_height*img_height_step;
-  const INDEX_TYPE batch_img_step = image_num*img_step;
-  const INDEX_TYPE homos_step = image_depth*8;
-  const INDEX_TYPE batch_homos_step = (image_num - 1)*homos_step;
-
-  for (auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
-    if(transformed_mask_data[i] < 0.5){
+              const INDEX_TYPE batch_size, 
+              const INDEX_TYPE image_height, 
+              const INDEX_TYPE image_width,
+              const INDEX_TYPE image_channels,
+              const INDEX_TYPE image_depth,
+              const INDEX_TYPE src_image_num,
+              const INDEX_TYPE src_image_height, 
+              const INDEX_TYPE src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              const T* cost_grad_data,
+              const int32* cost_mask_data,
+              T* ref_image_grad_data,
+              T* src_images_grad_data, 
+              T* base_plane_grad_data
+              ){
+  const auto src_image_height_step = src_image_width * image_channels;
+  
+  for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
+    if(cost_mask_data[i] == 0){
       continue;
     }
-    auto tmp = i/image_depth;
-    const auto cd = i - tmp*image_depth;
-    auto tmp1 = tmp;
-    tmp = tmp/image_width;
-    const auto cw = tmp1 - tmp*image_width;
-    const auto cb = tmp/image_height;
-    const auto ch = tmp - cb*image_height;
+    const auto batch_step = i/image_depth;
+    const auto d = i%image_depth;
 
-    const T* batch_img_ptr = &images_data[cb*batch_img_step];
-    T* batch_out_ptr = &out_data[cb*batch_img_step];
-    const T *ref_channels = &batch_img_ptr[(ch*image_width+cw)*image_channels];
-    T *ref_out_channels = &batch_out_ptr[(ch*image_width+cw)*image_channels];
-    const T * curr_homos = &transforms_data[cb*batch_homos_step + cd*8];
+    const auto tmp = batch_step/image_width;
+    const auto w = batch_step%image_width;
+    const auto b = tmp/image_height;
+    const auto h = tmp%image_height;
 
-    const T *grad_channels = &grad_data[i*image_channels];
+    const T * ref_channels = &ref_image_data[batch_step * image_channels];
+    T * ref_out_channels = &ref_image_grad_data[batch_step * image_channels];
 
-    for(INDEX_TYPE cn = 1; cn < image_num; cn++){
-      const T *src_homos = &curr_homos[(cn - 1)*homos_step];
-      T projection = src_homos[6] * cw + src_homos[7] * ch + 1.f;
-      if(projection == 0.0f){
+    const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
+
+    T cost_grad = cost_grad_data[i]/static_cast<T>(cost_mask_data[i]*static_cast<int32>(image_channels));
+
+    T depth_grad = T(0);
+    for(INDEX_TYPE n = 0; n < src_image_num; n++){
+      const T *R = &Rs_data[(b*src_image_num + n)*9];
+      const T *t = &Ts_data[(b*src_image_num + n)*3];
+
+      T src_z_coef = R[6] * w + R[7] * h + R[8];
+      T src_z = src_z_coef * depth + t[2];
+      if(src_z <= 0.0f){
         continue;
       }
-      const T src_w = (src_homos[0] * cw + src_homos[1] * ch + src_homos[2]) / projection;
-      const T src_h = (src_homos[3] * cw + src_homos[4] * ch + src_homos[5]) / projection;
+      T src_w_coef = R[0] * w + R[1] * h + R[2];
+      T src_w_3d = src_w_coef * depth + t[0];
+      T src_w = src_w_3d/src_z;
+      T src_h_coef = R[3] * w + R[4] * h + R[5];
+      T src_h_3d = src_h_coef * depth + t[1];
+      T src_h = src_h_3d/src_z;
 
-      if (src_h > 0.0f && src_w > 0.0f &&
-        src_h < static_cast<T>(image_height - 1) && src_w < static_cast<T>(image_width - 1)) {
-        const T fh = std::floor(src_h);
-        const T fw = std::floor(src_w);
+      if (src_h >= 0.0f && src_w >= 0.0f &&
+        src_h <= static_cast<T>(src_image_height - 1) && src_w <= static_cast<T>(src_image_width - 1)) {
+        const INDEX_TYPE fh = static_cast<INDEX_TYPE>(src_h);
+        const INDEX_TYPE fw = static_cast<INDEX_TYPE>(src_w);
         const T dh = src_h - fh;
         const T dw = src_w - fw;
         const T coef_ff = dh*dw;
@@ -274,97 +295,39 @@ __global__ void CostAggregateGradKernel(const INDEX_TYPE virtual_thread,
         const T coef_cc = (1 - dh)*(1 - dw);
         const T coef_cf = (1 - dh)*dw;
 
-        const T *src_channels_ff = &batch_img_ptr[((cn*image_height + static_cast<INDEX_TYPE>(fh))*image_width+static_cast<INDEX_TYPE>(fw))*image_channels];
-        T *src_out_channels_ff = &batch_out_ptr[((cn*image_height + static_cast<INDEX_TYPE>(fh))*image_width+static_cast<INDEX_TYPE>(fw))*image_channels];
+        const T *src_channels_ff = &src_images_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
+        T *src_out_channels_ff = &src_images_grad_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
         const T *src_channels_fc = &src_channels_ff[image_channels];
         T *src_out_channels_fc = &src_out_channels_ff[image_channels];
-        const T *src_channels_cc = &src_channels_fc[img_height_step];
-        T *src_out_channels_cc = &src_out_channels_fc[img_height_step];
-        const T *src_channels_cf = &src_channels_ff[img_height_step];
-        T *src_out_channels_cf = &src_out_channels_ff[img_height_step];
+        const T *src_channels_cc = &src_channels_fc[src_image_height_step];
+        T *src_out_channels_cc = &src_out_channels_fc[src_image_height_step];
+        const T *src_channels_cf = &src_channels_ff[src_image_height_step];
+        T *src_out_channels_cf = &src_out_channels_ff[src_image_height_step];
 
+        T h_grad = T(0);
+        T w_grad = T(0);
         for(int cc = 0; cc < image_channels; cc++){
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
                                   coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
           T diff = src_sample - ref_channels[cc];
-          T ref_grad = 2*diff*grad_channels[cc]/transformed_mask_data[i];
-          atomicAdd(&ref_out_channels[cc], -ref_grad);
-          atomicAdd(&src_out_channels_ff[cc], ref_grad*coef_cc);
-          atomicAdd(&src_out_channels_fc[cc], ref_grad*coef_cf);
-          atomicAdd(&src_out_channels_cc[cc], ref_grad*coef_ff);
-          atomicAdd(&src_out_channels_cf[cc], ref_grad*coef_fc);
+
+          T ref_grad = 2*diff*cost_grad;
+          GpuAtomicAdd(&ref_out_channels[cc], -ref_grad);
+          GpuAtomicAdd(&src_out_channels_ff[cc], ref_grad*coef_cc);
+          GpuAtomicAdd(&src_out_channels_fc[cc], ref_grad*coef_cf);
+          GpuAtomicAdd(&src_out_channels_cc[cc], ref_grad*coef_ff);
+          GpuAtomicAdd(&src_out_channels_cf[cc], ref_grad*coef_fc);
+
+          // Update partial gradients wrt relevant warp field entries
+          const auto t1 = src_channels_ff[cc] - src_channels_fc[cc];
+          const auto t2 = src_channels_cc[cc]  - src_channels_cf[cc] + t1;
+          h_grad += ref_grad * (t2 * dw - t1);
+          w_grad += ref_grad * (t2 * dh - t1);
         }
+        depth_grad += ((src_h_coef*src_z - src_z_coef*src_h_3d)*h_grad + (src_w_coef*src_z - src_z_coef*src_w_3d)*w_grad)/(src_z * src_z);
       }
     }
-  }
-}
-
-template <typename T, typename INDEX_TYPE>
-__global__ void CostAggregateGradKernelNoBatch(const INDEX_TYPE virtual_thread, 
-              const INDEX_TYPE batch_size, const INDEX_TYPE image_height, const INDEX_TYPE image_width, 
-              const INDEX_TYPE image_depth, const INDEX_TYPE image_channels, const INDEX_TYPE image_num,
-              const T* images_data, const T* transforms_data, const T* transformed_mask_data, const T* grad_data, T* out_data){
-  (void )batch_size;
-  const INDEX_TYPE img_height_step = image_width*image_channels;
-  const INDEX_TYPE homos_step = image_depth*8;
-
-  for (auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
-    if(transformed_mask_data[i] < 0.5){
-      continue;
-    }
-    auto tmp = i/image_depth;
-    const auto cd = i - tmp*image_depth;
-    const auto ch = tmp/image_width;
-    const auto cw = tmp - ch*image_width;
-
-    const T *ref_channels = &images_data[(ch*image_width+cw)*image_channels];
-    T *ref_out_channels = &out_data[(ch*image_width+cw)*image_channels];
-    const T *  curr_homos = &transforms_data[cd*8];
-
-    const T *grad_channels = &grad_data[i*image_channels];
-
-    for(INDEX_TYPE cn = 1; cn < image_num; cn++){
-      const T *src_homos = &curr_homos[(cn - 1)*homos_step];
-      T projection = src_homos[6] * cw + src_homos[7] * ch + 1.f;
-      if(projection == 0.0f){
-        continue;
-      }
-      const T src_w = (src_homos[0] * cw + src_homos[1] * ch + src_homos[2]) / projection;
-      const T src_h = (src_homos[3] * cw + src_homos[4] * ch + src_homos[5]) / projection;
-
-      if (src_h > 0.0f && src_w > 0.0f &&
-        src_h < static_cast<T>(image_height - 1) && src_w < static_cast<T>(image_width - 1)) {
-        const T fh = std::floor(src_h);
-        const T fw = std::floor(src_w);
-        const T dh = src_h - fh;
-        const T dw = src_w - fw;
-        const T coef_ff = dh*dw;
-        const T coef_fc = dh*(1 - dw);
-        const T coef_cc = (1 - dh)*(1 - dw);
-        const T coef_cf = (1 - dh)*dw;
-
-        const T *src_channels_ff = &images_data[((cn*image_height + static_cast<INDEX_TYPE>(fh))*image_width+static_cast<INDEX_TYPE>(fw))*image_channels];
-        T *src_out_channels_ff = &out_data[((cn*image_height + static_cast<INDEX_TYPE>(fh))*image_width+static_cast<INDEX_TYPE>(fw))*image_channels];
-        const T *src_channels_fc = &src_channels_ff[image_channels];
-        T *src_out_channels_fc = &src_out_channels_ff[image_channels];
-        const T *src_channels_cc = &src_channels_fc[img_height_step];
-        T *src_out_channels_cc = &src_out_channels_fc[img_height_step];
-        const T *src_channels_cf = &src_channels_ff[img_height_step];
-        T *src_out_channels_cf = &src_out_channels_ff[img_height_step];
-
-        for(int cc = 0; cc < image_channels; cc++){
-          T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
-                                  coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
-          T diff = src_sample - ref_channels[cc];
-          T ref_grad = 2*diff*grad_channels[cc]/transformed_mask_data[i];
-          atomicAdd(&ref_out_channels[cc], -ref_grad);
-          atomicAdd(&src_out_channels_ff[cc], ref_grad*coef_cc);
-          atomicAdd(&src_out_channels_fc[cc], ref_grad*coef_cf);
-          atomicAdd(&src_out_channels_cc[cc], ref_grad*coef_ff);
-          atomicAdd(&src_out_channels_cf[cc], ref_grad*coef_fc);
-        }
-      }
-    }
+    GpuAtomicAdd(&base_plane_grad_data[batch_step], depth_grad);
   }
 }
 
@@ -380,54 +343,97 @@ __global__ void SetZeroBig(const INDEX_TYPE count, T* __restrict__ ptr) {
 // Define the GPU implementation that launches the CUDA kernel.
 template <typename T>
 void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
-    const GPUDevice& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output) {
-    const int64 batch_size = grad.dim_size(0);
-    const int64 image_height = grad.dim_size(1);
-    const int64 image_width = grad.dim_size(2);
-    const int64 image_depth = grad.dim_size(3);
-    const int64 image_channels = grad.dim_size(4);
-    const int64 image_num = images.dim_size(1);
+    const GPUDevice& dev, 
+              const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              const T* cost_data,
+              const int32* cost_mask_data,
+              T* ref_image_grad_data,
+              T* src_images_grad_data, 
+              T* base_plane_grad_data
+                                ) {
+    const auto base_plane_size = batch_size * image_height *image_width;
+    const auto loop_count = base_plane_size * image_depth;
+    const auto input_ref_size = base_plane_size * image_channels;
+    const auto input_src_size = batch_size * src_image_num * src_image_height * src_image_width * image_channels;
 
-    const int64 loop_count = batch_size * image_depth* image_height * image_width;
-    const int64 input_image_size = batch_size * image_num * image_height * image_width * image_channels;
-    const int64 output_cost_size = batch_size * image_height * image_width * image_depth * image_channels;
+    if((input_ref_size > INT32_MAX) || (input_src_size > INT32_MAX) || (loop_count > INT32_MAX)){
+      auto config = GetGpuLaunchConfigBig(input_ref_size, dev, SetZeroBig<T, int64>, 0, 0);
+      SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_ref_size, ref_image_grad_data);
+      config = GetGpuLaunchConfigBig(input_src_size, dev, SetZeroBig<T, int64>, 0, 0);
+      SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_src_size, src_images_grad_data);
+      config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int64>, 0, 0);
+      SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
 
-    if((input_image_size > INT32_MAX) || (output_cost_size > INT32_MAX)){
-      auto config = GetGpuLaunchConfigBig(input_image_size, d, SetZeroBig<T, int64>, 0, 0);
-      SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(input_image_size, output->tensor<T, 5>().data());
-      if(batch_size == 1){
-        config = GetGpuLaunchConfigBig(loop_count, d, CostAggregateGradKernelNoBatch<T, int64>, 0, 0);
-        CostAggregateGradKernelNoBatch<T, int64><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
-                                  loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(), 
-                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
-      } else {
-        config = GetGpuLaunchConfigBig(loop_count, d, CostAggregateGradKernel<T, int64>, 0, 0);
-        CostAggregateGradKernel<T, int64><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
-                                  loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(),
-                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
-      }
+      config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateGradKernel<T, int64>, 0, 0);
+      CostAggregateGradKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+                                loop_count,
+                                batch_size, 
+                                image_height, 
+                                image_width,
+                                image_channels,
+                                image_depth,
+                                src_image_num,
+                                src_image_height, 
+                                src_image_width,
+                                ref_image_data,
+                                src_images_data, 
+                                base_plane_data,
+                                offsets_data,
+                                Rs_data,
+                                Ts_data,
+                                cost_data,
+                                cost_mask_data,
+                                ref_image_grad_data,
+                                src_images_grad_data, 
+                                base_plane_grad_data);
     } else {
-      auto config = GetGpuLaunchConfigBig(input_image_size, d, SetZeroBig<T, int>, 0, 0);
-      SetZeroBig<T, int><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(input_image_size, output->tensor<T, 5>().data());
-      if(batch_size == 1){
-        config = GetGpuLaunchConfigBig(loop_count, d, CostAggregateGradKernelNoBatch<T, int>, 0, 0);
-        CostAggregateGradKernelNoBatch<T, int><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
-                                  loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(),
-                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
-      } else {
-        config = GetGpuLaunchConfigBig(loop_count, d, CostAggregateGradKernel<T, int>, 0, 0);
-        CostAggregateGradKernel<T, int><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
-                                  loop_count, batch_size, image_height, image_width, image_depth, image_channels, image_num,
-                                  images.tensor<T, 5>().data(), transforms.tensor<T, 4>().data(), transformed_mask.tensor<T, 5>().data(),
-                                  grad.tensor<T, 5>().data(), output->tensor<T, 5>().data());
-      }
+      auto config = GetGpuLaunchConfigBig(input_ref_size, dev, SetZeroBig<T, int32>, 0, 0);
+      SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_ref_size, ref_image_grad_data);
+      config = GetGpuLaunchConfigBig(input_src_size, dev, SetZeroBig<T, int32>, 0, 0);
+      SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_src_size, src_images_grad_data);
+      config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int32>, 0, 0);
+      SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
+
+      config = GetGpuLaunchConfigBig(loop_count, dev, CostAggregateGradKernel<T, int32>, 0, 0);
+      CostAggregateGradKernel<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+                                loop_count,
+                                batch_size, 
+                                image_height, 
+                                image_width,
+                                image_channels,
+                                image_depth,
+                                src_image_num,
+                                src_image_height, 
+                                src_image_width,
+                                ref_image_data,
+                                src_images_data, 
+                                base_plane_data,
+                                offsets_data,
+                                Rs_data,
+                                Ts_data,
+                                cost_data,
+                                cost_mask_data,
+                                ref_image_grad_data,
+                                src_images_grad_data, 
+                                base_plane_grad_data);
     }
 }
 
 template struct CostAggregateGradFunctor<GPUDevice, float>;
+template struct CostAggregateGradFunctor<GPUDevice, double>;
 
 }  // end namespace functor
 

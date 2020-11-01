@@ -79,14 +79,54 @@ struct CostAggregateFunctor<Eigen::GpuDevice, T> {
 
 template <typename Device, typename T>
 struct CostAggregateGradFunctor {
-  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output);
+  void operator()(    const Device& dev, 
+              const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              const T* cost_data,
+              const int32* cost_mask_data,
+              T* ref_image_grad_data,
+              T* src_images_grad_data, 
+              T* base_plane_grad_data
+                                );
 };
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
 template <typename T>
 struct CostAggregateGradFunctor<Eigen::GpuDevice, T> {
-  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output);
+  void operator()(    const Eigen::GpuDevice& dev, 
+              const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              const T* cost_data,
+              const int32* cost_mask_data,
+              T* ref_image_grad_data,
+              T* src_images_grad_data, 
+              T* base_plane_grad_data
+                                );
 };
 #endif
 

@@ -22,9 +22,12 @@ import cv2
 from tensorflow.python.platform import test
 from tensorflow.python.framework import test_util
 from custom_helper_op import cost_aggregate, index_initializer
+from custom_helper_op.python.ops.custom_helper_ops import _custom_helper_ops
 import tensorflow as tf
 import tensorflow_addons as tfa
 import os
+from scipy.spatial.transform import Rotation as R
+import time
 
 def get_blendedmvs_samples(blendedmvs_data_folder, train_type='train'):
     """ generate data paths for blendedmvs dataset """
@@ -139,11 +142,11 @@ def combine_projection(ref_cam, src_cam, scale):
 def build_sampler_coordinate(R, T, base_plane, offsets):
     grid = base_plane + offsets[:, None, None, :]
     base_coordinate = index_initializer(tf.concat([tf.shape(base_plane)[1:3], [3, ]], axis=0),
-                                            half_centor=False)
+                                            half_centor=False, dtype=base_plane.dtype)
 
     coordinate = grid[:, :, :, :, None] * base_coordinate[None, :, :, None, :]
-    # sample_coodinate = tf.linalg.matvec(R[:, :, None, None, None, :, :], coordinate[:, None, :, :, :, :])
-    sample_coodinate = tf.reduce_sum(R[:, :, None, None, None, :, :] * coordinate[:, None, :, :, :, None, :], axis=-1)
+    sample_coodinate = tf.linalg.matvec(R[:, :, None, None, None, :, :], coordinate[:, None, :, :, :, :])
+    # sample_coodinate = tf.reduce_sum(R[:, :, None, None, None, :, :] * coordinate[:, None, :, :, :, None, :], axis=-1)
     sample_coodinate = sample_coodinate + T[:, :, None, None, None, :]
 
     mask = sample_coodinate[..., 2:3] > 0
@@ -159,24 +162,28 @@ def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts):
     image_shape = tf.shape(ref_image)[1:3]
     max_d = tf.shape(offsets)[1]
     src_num = tf.shape(src_images)[1]
-    with tf.device('gpu'):
-        sample_coordinate1, grid, coordinate = build_sampler_coordinate(Rs, Ts, base_plane, offsets)
+    sample_coordinate1, grid, coordinate = build_sampler_coordinate(Rs, Ts, base_plane, offsets)
     sample_coordinate = tf.reshape(sample_coordinate1, (-1, image_shape[0], image_shape[1], max_d, 2))
     maped_feature_volume = tfa.image.resampler(tf.reshape(src_images, (-1, image_shape[0], image_shape[1], 3)), sample_coordinate)
     maped_feature_volume = tf.reshape(maped_feature_volume,
                                         (-1, src_num, image_shape[0], image_shape[1], max_d, 3))
-    cost = tf.reduce_mean(tf.square(ref_image[:, None, :, :, None, :] - maped_feature_volume), axis=(1, -1))
+    cost = tf.reduce_mean(tf.square(maped_feature_volume - ref_image[:, None, :, :, None, :]), axis=(1, -1))
 
     return cost, sample_coordinate1, grid, coordinate
 
+@tf.function
+def test_check(*args):
+    cost, *_ = cost_aggregate(*args)
+    return tf.reduce_sum(cost)
+
 class MyOperatorTest(test_util.parameterized.TestCase):
   @test_util.parameterized.parameters(
-    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':10},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':11},
-    {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13}
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':10},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':11},
+    {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':256, 'IMAGE_WIDTH':320, 'IMAGE_CHANNELS':13, 'IMAGE_DEPTH':4}
   )
   def testCostAggregate(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256):
     mvs_input_list = get_blendedmvs_samples("/home/lucius/data/datasets/mvsnet/dataset_low_res")
@@ -195,7 +202,7 @@ class MyOperatorTest(test_util.parameterized.TestCase):
         internal = (ref_cam[1][3][3] - ref_cam[1][3][0])/(IMAGE_DEPTH - 1)
         batch_offsets.append(0.5*internal*tf.linspace(-IMAGE_DEPTH/2, IMAGE_DEPTH/2 + 1, IMAGE_DEPTH) )
 
-        scale = ref_image.shape/np.array([IMAGE_HEIGHT, IMAGE_WIDTH, 3.], dtype=np.float)
+        scale = np.array([IMAGE_HEIGHT, IMAGE_WIDTH, 3.], dtype=np.float)/ref_image.shape
         src_images = []
         src_Rs = []
         src_Ts = []
@@ -213,24 +220,129 @@ class MyOperatorTest(test_util.parameterized.TestCase):
         batch_Ts.append(tf.stack(src_Ts, axis=0))
 
 
-      batch_ref_depth = tf.cast(tf.stack(batch_ref_depth, axis=0), tf.float32)
-      batch_ref_image = tf.cast(tf.stack(batch_ref_image, axis=0), tf.float32)
-      batch_src_images = tf.cast(tf.stack(batch_src_images, axis=0), tf.float32)
-      batch_offsets = tf.cast(tf.stack(batch_offsets, axis=0), tf.float32)
-      batch_Rs = tf.cast(tf.stack(batch_Rs, axis=0), tf.float32)
-      batch_Ts = tf.squeeze(tf.cast(tf.stack(batch_Ts, axis=0), tf.float32), axis=-1)
-      cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts)
+      batch_ref_depth = tf.cast(tf.stack(batch_ref_depth, axis=0), tf.float64)
+      batch_ref_image = tf.cast(tf.stack(batch_ref_image, axis=0), tf.float64)
+      batch_src_images = tf.cast(tf.stack(batch_src_images, axis=0), tf.float64)
+      batch_offsets = tf.cast(tf.stack(batch_offsets, axis=0), tf.float64)
+      batch_Rs = tf.cast(tf.stack(batch_Rs, axis=0), tf.float64)
+      batch_Ts = tf.squeeze(tf.cast(tf.stack(batch_Ts, axis=0), tf.float64), axis=-1)
+
+      start = time.time()
       cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts)
-      cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
       cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
+      base_time = time.time() - start
+      start = time.time()
+      cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts)
+      cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
+      tfa_time = time.time() - start
 
-      print(np.max(cost_tfa.numpy()), tf.reduce_sum(tf.cast(cost_mask == 0, tf.float32)).numpy()/tf.reduce_prod(tf.shape(cost_mask)).numpy(), 
-      tf.reduce_sum(tf.cast(cost_mask >= IMAGE_NUM, tf.float32)).numpy()/tf.reduce_prod(tf.shape(cost_mask)).numpy())
-      diff = tf.abs(cost_tfa - cost).numpy()
-      print(np.argwhere(np.max(diff) == diff))
+      cost_mask_indice = (cost_mask >= IMAGE_NUM).numpy()
+      err = tf.abs(cost_tfa - cost).numpy()
+      err = err[cost_mask_indice]
+      err = np.sort(err)
+      print(len(err), " base_time: ", base_time/1000, " tfa_time: ", tfa_time/1000)
+      if len(err) > 0:
+        np.testing.assert_almost_equal(err[len(err)*4//5] , 1e-8)
 
-      np.testing.assert_almost_equal(cost_tfa.numpy(), cost.numpy())
 
+  @test_util.parameterized.parameters(
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4},
+    # {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5},
+    # {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4},
+    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':3}
+  )
+  def testCostAggregateGradDataset(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256):
+    mvs_input_list = get_blendedmvs_samples("/home/lucius/data/datasets/mvsnet/dataset_low_res")
+    np.random.shuffle(mvs_input_list)
+    for i in range(10):
+      batch_ref_depth = []
+      batch_ref_image = []
+      batch_src_images = []
+      batch_offsets = []
+      batch_Rs = []
+      batch_Ts = []
+      for b in range(BATCH_SIZE):
+        ref_depth = cv2.imread(mvs_input_list[i*BATCH_SIZE + b][0], cv2.IMREAD_UNCHANGED)
+        ref_image = cv2.imread(mvs_input_list[i*BATCH_SIZE + b][1], cv2.IMREAD_UNCHANGED)
+        ref_cam = load_cam(mvs_input_list[i*BATCH_SIZE + b][2])
+        internal = (ref_cam[1][3][3] - ref_cam[1][3][0])/(IMAGE_DEPTH - 1)
+        batch_offsets.append(0.5*internal*tf.linspace(-IMAGE_DEPTH/2, IMAGE_DEPTH/2 + 1, IMAGE_DEPTH) )
+
+        scale = np.array([IMAGE_HEIGHT, IMAGE_WIDTH, 3.], dtype=np.float)/ref_image.shape
+        src_images = []
+        src_Rs = []
+        src_Ts = []
+        for n in range(IMAGE_NUM):
+          src_images.append(tf.image.resize(cv2.imread(mvs_input_list[i*BATCH_SIZE + b][2*n + 3], cv2.IMREAD_UNCHANGED)/256., (IMAGE_HEIGHT, IMAGE_WIDTH), method='area' ))
+          src_cam = load_cam(mvs_input_list[i*BATCH_SIZE + b][2*n + 4])
+          R, T = combine_projection(ref_cam, src_cam, scale)
+          src_Rs.append(R)
+          src_Ts.append(T)
+
+        batch_ref_depth.append(tf.image.resize(ref_depth[:, :, None], (IMAGE_HEIGHT, IMAGE_WIDTH), method='bilinear'))
+        batch_ref_image.append(tf.image.resize(ref_image/256., (IMAGE_HEIGHT, IMAGE_WIDTH), method='area'))
+        batch_src_images.append(tf.stack(src_images, axis=0))
+        batch_Rs.append(tf.stack(src_Rs, axis=0))
+        batch_Ts.append(tf.stack(src_Ts, axis=0))
+
+
+      batch_ref_depth = tf.cast(tf.stack(batch_ref_depth, axis=0), tf.float64)
+      batch_ref_image = tf.cast(tf.stack(batch_ref_image, axis=0), tf.float64)
+      batch_src_images = tf.cast(tf.stack(batch_src_images, axis=0), tf.float64)
+      batch_offsets = tf.cast(tf.stack(batch_offsets, axis=0), tf.float64)
+      batch_Rs = tf.cast(tf.stack(batch_Rs, axis=0), tf.float64)
+      batch_Ts = tf.squeeze(tf.cast(tf.stack(batch_Ts, axis=0), tf.float64), axis=-1)
+
+      theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
+
+      np.testing.assert_almost_equal(theoretical[0][..., 1:-1, 1:-1] , numerical[0][..., 1:-1, 1:-1])
+      np.testing.assert_almost_equal(theoretical[1][..., 1:-1, 1:-1] , numerical[1][..., 1:-1, 1:-1])
+      np.testing.assert_almost_equal(theoretical[2][..., 1:-1, 1:-1] , numerical[2][..., 1:-1, 1:-1])
+
+  @test_util.parameterized.parameters(
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':5},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':9},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':10},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':6},
+    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13}
+  )
+  def testCostAggregateGrad(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4):
+    batch_ref_image = np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
+    batch_src_images = np.random.random([BATCH_SIZE, IMAGE_NUM, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
+    batch_ref_depth = (np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]) + 2)*10
+    batch_offsets = np.random.random([BATCH_SIZE, IMAGE_DEPTH])*4 - 2
+    batch_Rs = np.tile(np.diagflat([1., 1., 1.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
+    batch_Ts = np.tile(np.array([0., 0., 0.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
+
+    theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
+    np.testing.assert_almost_equal(theoretical[0][..., 1:-1, 1:-1] , numerical[0][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[1][..., 1:-1, 1:-1] , numerical[1][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[2][..., 1:-1, 1:-1] , numerical[2][..., 1:-1, 1:-1])
+    print("1: ",np.max(theoretical[0]), np.max(theoretical[1]), np.max(theoretical[2]))
+
+    batch_Ts = np.tile(np.array([3., 3., 3.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
+    theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
+    np.testing.assert_almost_equal(theoretical[0][..., 1:-1, 1:-1] , numerical[0][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[1][..., 1:-1, 1:-1] , numerical[1][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[2][..., 1:-1, 1:-1] , numerical[2][..., 1:-1, 1:-1])
+    print("2: ",np.max(theoretical[0]), np.max(theoretical[1]), np.max(theoretical[2]))
+
+    batch_Rs = np.tile(R.from_rotvec(np.pi/2 * np.array([0, 0, 1])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
+    theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
+    np.testing.assert_almost_equal(theoretical[0][..., 1:-1, 1:-1] , numerical[0][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[1][..., 1:-1, 1:-1] , numerical[1][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[2][..., 1:-1, 1:-1] , numerical[2][..., 1:-1, 1:-1])
+    print("3: ",np.max(theoretical[0]), np.max(theoretical[1]), np.max(theoretical[2]))
+
+    batch_Rs = np.tile(R.from_rotvec(np.pi/8 * np.array([0, 1, 0])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
+    theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
+    np.testing.assert_almost_equal(theoretical[0][..., 1:-1, 1:-1] , numerical[0][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[1][..., 1:-1, 1:-1] , numerical[1][..., 1:-1, 1:-1])
+    np.testing.assert_almost_equal(theoretical[2][..., 1:-1, 1:-1] , numerical[2][..., 1:-1, 1:-1])
+    print("4: ",np.max(theoretical[0]), np.max(theoretical[1]), np.max(theoretical[2]))
 
 if __name__ == '__main__':
   test.main()

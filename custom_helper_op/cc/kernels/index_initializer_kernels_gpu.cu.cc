@@ -38,6 +38,8 @@ void FillIndexFunctor<Eigen::GpuDevice, T, half_centor>::operator()(OpKernelCont
 
 template struct FillIndexFunctor<GPUDevice, float, true>;
 template struct FillIndexFunctor<GPUDevice, float, false>;
+template struct FillIndexFunctor<GPUDevice, double, true>;
+template struct FillIndexFunctor<GPUDevice, double, false>;
 } /* functor */
 } /* custom_helper_op */
 } /* tensorflow */

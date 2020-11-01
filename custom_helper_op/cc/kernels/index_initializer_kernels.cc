@@ -42,6 +42,8 @@ struct FillIndexFunctor<Eigen::ThreadPoolDevice, T, half_centor> {
 };
 template struct FillIndexFunctor<Eigen::ThreadPoolDevice, float, true>;
 template struct FillIndexFunctor<Eigen::ThreadPoolDevice, float, false>;
+template struct FillIndexFunctor<Eigen::ThreadPoolDevice, double, true>;
+template struct FillIndexFunctor<Eigen::ThreadPoolDevice, double, false>;
 } /* functor */
 
 using functor::FillIndexFunctor;
@@ -103,7 +105,7 @@ class IndexInitializerOp : public OpKernel {
                               IndexInitializerOp<Eigen::ThreadPoolDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
-
+TF_CALL_double(REGISTER);
 #undef REGISTER
 
 #if GOOGLE_CUDA
@@ -118,7 +120,7 @@ typedef Eigen::GpuDevice GPUDevice;
                           IndexInitializerOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
-
+TF_CALL_double(REGISTER);
 #undef REGISTER
 
 #endif  // GOOGLE_CUDA

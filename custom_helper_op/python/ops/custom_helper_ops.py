@@ -45,6 +45,8 @@ def _cost_volume_grad(op, grad_out, grad_mask):
     image_grad = _custom_helper_ops.cost_volume_grad(images=images_tensor, transforms=transforms_tensor, transformed_mask=transformed_mask, grad=grad_output_tensor, interpolation='BILINEAR')
     return [image_grad, None]
 
+tf.no_gradient("CostVolumeGrad")
+
 @tf.function
 def cost_aggregate(ref_image, src_images, base_plane, offsets, Rs, Ts, name=None):
     with tf.name_scope(name or "cost_aggregate"):
@@ -54,13 +56,27 @@ def cost_aggregate(ref_image, src_images, base_plane, offsets, Rs, Ts, name=None
         return _custom_helper_ops.cost_aggregate(ref_image=ref_image, src_images=src_images, base_plane=base_plane, offsets=offsets, rs=rs, ts=ts)
 
 
-@tf.RegisterGradient("cost_aggregate")
+@tf.RegisterGradient("CostAggregate")
 def _cost_aggregate_grad(op, grad_out, grad_mask):
     ref_image, src_images, base_plane, offsets, Rs, Ts = op.inputs
     cost, cost_mask = op.outputs
-    grad_output_tensor = tf.convert_to_tensor(grad_out, name="grad_output")
-    ref_image_grad, src_images_grad, base_plane_grad = _custom_helper_ops.cost_aggregate_grad(images=images_tensor, transforms=transforms_tensor, transformed_mask=transformed_mask, grad=grad_output_tensor, interpolation='BILINEAR')
+
+    offsets = tf.convert_to_tensor(offsets, name="offsets")
+    rs = tf.convert_to_tensor(Rs, name="Rs")
+    ts = tf.convert_to_tensor(Ts, name="Ts")
+
+    ref_image_grad, src_images_grad, base_plane_grad = _custom_helper_ops.cost_aggregate_grad(ref_image=ref_image, 
+                                                                                          src_images=src_images, 
+                                                                                          base_plane=base_plane, 
+                                                                                          offsets=offsets, 
+                                                                                          rs=rs, 
+                                                                                          ts=ts,
+                                                                                          cost_grad=grad_out,
+                                                                                          cost_mask=cost_mask,
+                                                                                          )
     return [ref_image_grad, src_images_grad, base_plane_grad, None, None, None]
+
+tf.no_gradient("CostAggregateGrad")
 
 
 def decode_pfm(contents, name=None):
@@ -74,8 +90,6 @@ def decode_pfm(contents, name=None):
     """
     return _custom_helper_ops.decode_pfm(contents, name=name)
 
-
-tf.no_gradient("CostVolumeGrad")
 
 def index_initializer(output_shape, half_centor=True, dtype=tf.float32):
       return _custom_helper_ops.index_initializer(output_shape=output_shape, half_centor=half_centor, dtype=dtype)
