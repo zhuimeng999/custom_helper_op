@@ -346,7 +346,7 @@ class MyOperatorTest(test_util.parameterized.TestCase):
     @tf.function
     def test_check(*args):
         cost, *_ = cost_aggregate(*args, reduce_method=reduce_method)
-        return tf.reduce_meancost)
+        return tf.reduce_mean(cost)
 
     mvs_input_list = get_blendedmvs_samples("/home/lucius/data/datasets/mvsnet/dataset_low_res")
     np.random.shuffle(mvs_input_list)
