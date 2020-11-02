@@ -34,9 +34,9 @@ namespace functor {
 
 enum COST_REDUCE_METHOD { COST_REDUCE_MEAN, COST_REDUCE_MIN };
 
-template <typename Device, typename T, COST_REDUCE_METHOD reduce_method>
+template <typename Device, typename T>
 struct CostAggregateFunctor {
-  void operator()(const Device& dev, 
+  void operator()(const Device& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 
               const int64 image_width,
@@ -57,9 +57,9 @@ struct CostAggregateFunctor {
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T, COST_REDUCE_METHOD reduce_method>
-struct CostAggregateFunctor<Eigen::GpuDevice, T, reduce_method> {
-  void operator()(const Eigen::GpuDevice& dev, 
+template <typename T>
+struct CostAggregateFunctor<Eigen::GpuDevice, T> {
+  void operator()(const Eigen::GpuDevice& dev, COST_REDUCE_METHOD reduce_method, 
                const int64 batch_size, 
               const int64 image_height, 
               const int64 image_width,
@@ -79,9 +79,9 @@ struct CostAggregateFunctor<Eigen::GpuDevice, T, reduce_method> {
 };
 #endif
 
-template <typename Device, typename T, COST_REDUCE_METHOD reduce_method>
+template <typename Device, typename T>
 struct CostAggregateGradFunctor {
-  void operator()(    const Device& dev, 
+  void operator()(    const Device& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 
               const int64 image_width,
@@ -106,9 +106,9 @@ struct CostAggregateGradFunctor {
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T, COST_REDUCE_METHOD reduce_method>
-struct CostAggregateGradFunctor<Eigen::GpuDevice, T, reduce_method> {
-  void operator()(    const Eigen::GpuDevice& dev, 
+template <typename T>
+struct CostAggregateGradFunctor<Eigen::GpuDevice, T> {
+  void operator()(    const Eigen::GpuDevice& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 
               const int64 image_width,

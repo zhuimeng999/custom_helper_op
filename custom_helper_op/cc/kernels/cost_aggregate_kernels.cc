@@ -98,46 +98,25 @@ class CostAggregateOp : public OpKernel {
                             output_shape,
                             &cost_mask));
 
-    if(reduce_method_ == COST_REDUCE_MEAN){
-      CostAggregateFunctor<Device, T, COST_REDUCE_MEAN>()(
-                                  ctx->eigen_device<Device>(), 
-                                  batch_size, 
-                                  image_height, 
-                                  image_width,
-                                  image_channels,
-                                  image_depth,
-                                  src_image_num,
-                                  src_images.dim_size(2), 
-                                  src_images.dim_size(3),
-                                  ref_image.tensor<T, 4>().data(),
-                                  src_images.tensor<T, 5>().data(), 
-                                  base_plane.tensor<T, 4>().data(),
-                                  offsets.tensor<T, 2>().data(),
-                                  Rs.tensor<T, 4>().data(),
-                                  Ts.tensor<T, 3>().data(),
-                                  cost->tensor<T, 4>().data(),
-                                  cost_mask->tensor<int32, 4>().data());
-    } else {
-      CostAggregateFunctor<Device, T, COST_REDUCE_MIN>()(
-                                  ctx->eigen_device<Device>(), 
-                                  batch_size, 
-                                  image_height, 
-                                  image_width,
-                                  image_channels,
-                                  image_depth,
-                                  src_image_num,
-                                  src_images.dim_size(2), 
-                                  src_images.dim_size(3),
-                                  ref_image.tensor<T, 4>().data(),
-                                  src_images.tensor<T, 5>().data(), 
-                                  base_plane.tensor<T, 4>().data(),
-                                  offsets.tensor<T, 2>().data(),
-                                  Rs.tensor<T, 4>().data(),
-                                  Ts.tensor<T, 3>().data(),
-                                  cost->tensor<T, 4>().data(),
-                                  cost_mask->tensor<int32, 4>().data());
-    }
 
+    CostAggregateFunctor<Device, T>()(
+                                  ctx->eigen_device<Device>(), reduce_method_,
+                                  batch_size, 
+                                  image_height, 
+                                  image_width,
+                                  image_channels,
+                                  image_depth,
+                                  src_image_num,
+                                  src_images.dim_size(2), 
+                                  src_images.dim_size(3),
+                                  ref_image.tensor<T, 4>().data(),
+                                  src_images.tensor<T, 5>().data(), 
+                                  base_plane.tensor<T, 4>().data(),
+                                  offsets.tensor<T, 2>().data(),
+                                  Rs.tensor<T, 4>().data(),
+                                  Ts.tensor<T, 3>().data(),
+                                  cost->tensor<T, 4>().data(),
+                                  cost_mask->tensor<int32, 4>().data());
   }
 private:
   TF_DISALLOW_COPY_AND_ASSIGN(CostAggregateOp);
@@ -232,9 +211,8 @@ private:
                             base_plane.shape(),
                             &base_plane_grad));                           
 
-    if(reduce_method_ == COST_REDUCE_MEAN){
-      CostAggregateGradFunctor<Device, T, COST_REDUCE_MEAN>()(
-                                  ctx->eigen_device<Device>(), 
+    CostAggregateGradFunctor<Device, T>()(
+                                  ctx->eigen_device<Device>(), reduce_method_,
                                   batch_size, 
                                   image_height, 
                                   image_width,
@@ -254,29 +232,6 @@ private:
                                   ref_image_grad->tensor<T, 4>().data(),
                                   src_images_grad->tensor<T, 5>().data(),
                                   base_plane_grad->tensor<T, 4>().data());
-    } else {
-      CostAggregateGradFunctor<Device, T, COST_REDUCE_MIN>()(
-                                  ctx->eigen_device<Device>(), 
-                                  batch_size, 
-                                  image_height, 
-                                  image_width,
-                                  image_channels,
-                                  image_depth,
-                                  src_image_num,
-                                  src_images.dim_size(2), 
-                                  src_images.dim_size(3),
-                                  ref_image.tensor<T, 4>().data(),
-                                  src_images.tensor<T, 5>().data(), 
-                                  base_plane.tensor<T, 4>().data(),
-                                  offsets.tensor<T, 2>().data(),
-                                  Rs.tensor<T, 4>().data(),
-                                  Ts.tensor<T, 3>().data(),
-                                  cost_grad.tensor<T, 4>().data(),
-                                  cost_mask.tensor<int32, 4>().data(),
-                                  ref_image_grad->tensor<T, 4>().data(),
-                                  src_images_grad->tensor<T, 5>().data(),
-                                  base_plane_grad->tensor<T, 4>().data());
-    }
   }
 private:
   TF_DISALLOW_COPY_AND_ASSIGN(CostAggregateGradOp);
