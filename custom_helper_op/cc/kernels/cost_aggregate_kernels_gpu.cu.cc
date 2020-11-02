@@ -30,7 +30,7 @@ namespace functor {
 // Explicit instantiation of the GPU functor.
 typedef Eigen::GpuDevice GPUDevice;
 
-template <typename T, typename INDEX_TYPE>
+template <typename T, typename INDEX_TYPE, bool half_centor>
 __global__ void CostMeanAggregateKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
@@ -62,8 +62,12 @@ __global__ void CostMeanAggregateKernel(const INDEX_TYPE virtual_thread,
     const T * ref_channels = &ref_image_data[batch_step * image_channels];
 
     const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
-    // const T ref_w = w*depth;
-    // const T ref_h = h*depth;
+    T ref_w = static_cast<T>(w);
+    T ref_h = static_cast<T>(h);
+    if(half_centor){
+      ref_w = ref_w + 0.5;
+      ref_h = ref_h + 0.5;
+    }
 
     T cost = T(0.);
     int32 used_sample = 0;
@@ -71,17 +75,21 @@ __global__ void CostMeanAggregateKernel(const INDEX_TYPE virtual_thread,
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
-      T src_z_coef = R[6] * w + R[7] * h + R[8];
+      T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
       T src_z = src_z_coef * depth + t[2];
       if(src_z <= 0.0f){
         continue;
       }
-      T src_w_coef = R[0] * w + R[1] * h + R[2];
+      T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
       T src_w_3d = src_w_coef * depth + t[0];
       T src_w = src_w_3d/src_z;
-      T src_h_coef = R[3] * w + R[4] * h + R[5];
+      T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
       T src_h_3d = src_h_coef * depth + t[1];
       T src_h = src_h_3d/src_z;
+      if(half_centor){
+        src_w = src_w - 0.5;
+        src_h = src_h - 0.5;
+      }
 
       if (src_h > 0.0f && src_w > 0.0f &&
         src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
@@ -117,7 +125,7 @@ __global__ void CostMeanAggregateKernel(const INDEX_TYPE virtual_thread,
   }
 }
 
-template <typename T, typename INDEX_TYPE>
+template <typename T, typename INDEX_TYPE, bool half_centor>
 __global__ void CostMinAggregateKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
@@ -149,8 +157,12 @@ __global__ void CostMinAggregateKernel(const INDEX_TYPE virtual_thread,
     const T * ref_channels = &ref_image_data[batch_step * image_channels];
 
     const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
-    // const T ref_w = w*depth;
-    // const T ref_h = h*depth;
+    T ref_w = static_cast<T>(w);
+    T ref_h = static_cast<T>(h);
+    if(half_centor){
+      ref_w = ref_w + 0.5;
+      ref_h = ref_h + 0.5;
+    }
 
     T cost = std::numeric_limits<T>::max();
     int32 used_sample = -1;
@@ -158,17 +170,21 @@ __global__ void CostMinAggregateKernel(const INDEX_TYPE virtual_thread,
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
-      T src_z_coef = R[6] * w + R[7] * h + R[8];
+      T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
       T src_z = src_z_coef * depth + t[2];
       if(src_z <= 0.0f){
         continue;
       }
-      T src_w_coef = R[0] * w + R[1] * h + R[2];
+      T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
       T src_w_3d = src_w_coef * depth + t[0];
       T src_w = src_w_3d/src_z;
-      T src_h_coef = R[3] * w + R[4] * h + R[5];
+      T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
       T src_h_3d = src_h_coef * depth + t[1];
       T src_h = src_h_3d/src_z;
+      if(half_centor){
+        src_w = src_w - 0.5;
+        src_h = src_h - 0.5;
+      }
 
       if (src_h > 0.0f && src_w > 0.0f &&
         src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
@@ -269,8 +285,8 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
                                   cost_mask_data
 
 // Define the GPU implementation that launches the CUDA kernel.
-template <typename T>
-void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
+template <typename T, bool half_centor>
+void CostAggregateFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
     const GPUDevice& dev, COST_REDUCE_METHOD reduce_method,
               const int64 batch_size, 
               const int64 image_height, 
@@ -294,32 +310,34 @@ void CostAggregateFunctor<Eigen::GpuDevice, T>::operator()(
     const auto input_src_size = batch_size * src_image_num * src_image_height * src_image_width * image_channels;
     if((input_ref_size > INT32_MAX) || (input_src_size > INT32_MAX) || (loop_count > INT32_MAX)){
       if(reduce_method == COST_REDUCE_MEAN){
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateKernel<T, int64>, 0, 0);
-        CostMeanAggregateKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateKernel<T, int64, half_centor>, 0, 0);
+        CostMeanAggregateKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST);
       } else {
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateKernel<T, int64>, 0, 0);
-        CostMinAggregateKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateKernel<T, int64, half_centor>, 0, 0);
+        CostMinAggregateKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST);
       }
 
     } else {
       if(reduce_method == COST_REDUCE_MEAN){
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateKernel<T, int32>, 0, 0);
-        CostMeanAggregateKernel<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateKernel<T, int32, half_centor>, 0, 0);
+        CostMeanAggregateKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST);
       } else {
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateKernel<T, int32>, 0, 0);
-        CostMinAggregateKernel<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateKernel<T, int32, half_centor>, 0, 0);
+        CostMinAggregateKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST);
       }
     }
 }
 
-template struct CostAggregateFunctor<GPUDevice, float>;
-template struct CostAggregateFunctor<GPUDevice, double>;
+template struct CostAggregateFunctor<GPUDevice, float, true>;
+template struct CostAggregateFunctor<GPUDevice, float, false>;
+template struct CostAggregateFunctor<GPUDevice, double, true>;
+template struct CostAggregateFunctor<GPUDevice, double, false>;
 
-template <typename T, typename INDEX_TYPE>
+template <typename T, typename INDEX_TYPE, bool half_centor>
 __global__ void CostMeanAggregateGradKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
@@ -359,6 +377,12 @@ __global__ void CostMeanAggregateGradKernel(const INDEX_TYPE virtual_thread,
     T * ref_out_channels = &ref_image_grad_data[batch_step * image_channels];
 
     const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
+    T ref_w = static_cast<T>(w);
+    T ref_h = static_cast<T>(h);
+    if(half_centor){
+      ref_w = ref_w + 0.5;
+      ref_h = ref_h + 0.5;
+    }
 
     T cost_grad = cost_grad_data[i]/static_cast<T>(cost_mask_data[i]*static_cast<int32>(image_channels));
 
@@ -367,17 +391,21 @@ __global__ void CostMeanAggregateGradKernel(const INDEX_TYPE virtual_thread,
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
-      T src_z_coef = R[6] * w + R[7] * h + R[8];
+      T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
       T src_z = src_z_coef * depth + t[2];
       if(src_z <= 0.0f){
         continue;
       }
-      T src_w_coef = R[0] * w + R[1] * h + R[2];
+      T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
       T src_w_3d = src_w_coef * depth + t[0];
       T src_w = src_w_3d/src_z;
-      T src_h_coef = R[3] * w + R[4] * h + R[5];
+      T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
       T src_h_3d = src_h_coef * depth + t[1];
       T src_h = src_h_3d/src_z;
+      if(half_centor){
+        src_w = src_w - 0.5;
+        src_h = src_h - 0.5;
+      }
 
       if (src_h > 0.0f && src_w > 0.0f &&
         src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
@@ -425,7 +453,7 @@ __global__ void CostMeanAggregateGradKernel(const INDEX_TYPE virtual_thread,
   }
 }
 
-template <typename T, typename INDEX_TYPE>
+template <typename T, typename INDEX_TYPE, bool half_centor>
 __global__ void CostMinAggregateGradKernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
@@ -465,6 +493,12 @@ __global__ void CostMinAggregateGradKernel(const INDEX_TYPE virtual_thread,
     T * ref_out_channels = &ref_image_grad_data[batch_step * image_channels];
 
     const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
+    T ref_w = static_cast<T>(w);
+    T ref_h = static_cast<T>(h);
+    if(half_centor){
+      ref_w = ref_w + 0.5;
+      ref_h = ref_h + 0.5;
+    }
 
     T cost_grad = cost_grad_data[i]/static_cast<T>(image_channels);
 
@@ -475,17 +509,21 @@ __global__ void CostMinAggregateGradKernel(const INDEX_TYPE virtual_thread,
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
-      T src_z_coef = R[6] * w + R[7] * h + R[8];
+      T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
       T src_z = src_z_coef * depth + t[2];
       if(src_z <= 0.0f){
         continue;
       }
-      T src_w_coef = R[0] * w + R[1] * h + R[2];
+      T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
       T src_w_3d = src_w_coef * depth + t[0];
       T src_w = src_w_3d/src_z;
-      T src_h_coef = R[3] * w + R[4] * h + R[5];
+      T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
       T src_h_3d = src_h_coef * depth + t[1];
       T src_h = src_h_3d/src_z;
+      if(half_centor){
+        src_w = src_w - 0.5;
+        src_h = src_h - 0.5;
+      }
 
       // if (src_h > 0.0f && src_w > 0.0f &&
       //   src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
@@ -545,8 +583,8 @@ __global__ void SetZeroBig(const INDEX_TYPE count, T* __restrict__ ptr) {
   }
 }
 // Define the GPU implementation that launches the CUDA kernel.
-template <typename T>
-void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
+template <typename T, bool half_centor>
+void CostAggregateGradFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
     const GPUDevice& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 
@@ -581,12 +619,12 @@ void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
       config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int64>, 0, 0);
       SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
       if(reduce_method == COST_REDUCE_MEAN){
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateGradKernel<T, int64>, 0, 0);
-        CostMeanAggregateGradKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateGradKernel<T, int64, half_centor>, 0, 0);
+        CostMeanAggregateGradKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       } else {
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateGradKernel<T, int64>, 0, 0);
-        CostMinAggregateGradKernel<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateGradKernel<T, int64, half_centor>, 0, 0);
+        CostMinAggregateGradKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       }
 
@@ -599,21 +637,22 @@ void CostAggregateGradFunctor<Eigen::GpuDevice, T>::operator()(
       SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
 
       if(reduce_method == COST_REDUCE_MEAN){
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateGradKernel<T, int32>, 0, 0);
-        CostMeanAggregateGradKernel<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateGradKernel<T, int32, half_centor>, 0, 0);
+        CostMeanAggregateGradKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       } else {
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateGradKernel<T, int32>, 0, 0);
-        CostMinAggregateGradKernel<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateGradKernel<T, int32, half_centor>, 0, 0);
+        CostMinAggregateGradKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       }
 
     }
 }
 
-template struct CostAggregateGradFunctor<GPUDevice, float>;
-template struct CostAggregateGradFunctor<GPUDevice, double>;
-
+template struct CostAggregateGradFunctor<GPUDevice, float, true>;
+template struct CostAggregateGradFunctor<GPUDevice, float, false>;
+template struct CostAggregateGradFunctor<GPUDevice, double, true>;
+template struct CostAggregateGradFunctor<GPUDevice, double, false>;
 }  // end namespace functor
 
 }  // end namespace addons

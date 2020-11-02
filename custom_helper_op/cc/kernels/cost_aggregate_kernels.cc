@@ -28,6 +28,24 @@ limitations under the License.
 namespace tensorflow {
 namespace custom_helper_op {
 
+#define COST_FUNCTOR_ARG_LIST \
+                                  batch_size, \
+                                  image_height, \
+                                  image_width,\
+                                  image_channels,\
+                                  image_depth,\
+                                  src_image_num,\
+                                  src_images.dim_size(2), \
+                                  src_images.dim_size(3),\
+                                  ref_image.tensor<T, 4>().data(),\
+                                  src_images.tensor<T, 5>().data(), \
+                                  base_plane.tensor<T, 4>().data(),\
+                                  offsets.tensor<T, 2>().data(),\
+                                  Rs.tensor<T, 4>().data(),\
+                                  Ts.tensor<T, 3>().data(),\
+                                  cost->tensor<T, 4>().data(),\
+                                  cost_mask->tensor<int32, 4>().data()
+
 using functor::COST_REDUCE_METHOD;
 using functor::COST_REDUCE_MEAN;
 using functor::COST_REDUCE_MIN;
@@ -39,7 +57,7 @@ template <typename Device, typename T>
 class CostAggregateOp : public OpKernel {
   private:
   COST_REDUCE_METHOD reduce_method_;
-
+  bool half_centor_;
  public:
   explicit CostAggregateOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
@@ -53,6 +71,7 @@ class CostAggregateOp : public OpKernel {
       LOG(FATAL) << "Invalid reduce method " << reduce_method
                  << ". Supported types: MEAN, MIN";
     }
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("half_centor", &half_centor_));
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -98,25 +117,16 @@ class CostAggregateOp : public OpKernel {
                             output_shape,
                             &cost_mask));
 
+    if(half_centor_){
+      CostAggregateFunctor<Device, T, true>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_ARG_LIST);
+    } else {
+      CostAggregateFunctor<Device, T, false>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_ARG_LIST);
+    }
 
-    CostAggregateFunctor<Device, T>()(
-                                  ctx->eigen_device<Device>(), reduce_method_,
-                                  batch_size, 
-                                  image_height, 
-                                  image_width,
-                                  image_channels,
-                                  image_depth,
-                                  src_image_num,
-                                  src_images.dim_size(2), 
-                                  src_images.dim_size(3),
-                                  ref_image.tensor<T, 4>().data(),
-                                  src_images.tensor<T, 5>().data(), 
-                                  base_plane.tensor<T, 4>().data(),
-                                  offsets.tensor<T, 2>().data(),
-                                  Rs.tensor<T, 4>().data(),
-                                  Ts.tensor<T, 3>().data(),
-                                  cost->tensor<T, 4>().data(),
-                                  cost_mask->tensor<int32, 4>().data());
   }
 private:
   TF_DISALLOW_COPY_AND_ASSIGN(CostAggregateOp);
@@ -139,11 +149,33 @@ TF_CALL_double(REGISTER);
 
 #endif  // GOOGLE_CUDA
 
+#define COST_FUNCTOR_GRAD_ARG_LIST \
+                                  batch_size, \
+                                  image_height, \
+                                  image_width,\
+                                  image_channels,\
+                                  image_depth,\
+                                  src_image_num,\
+                                  src_images.dim_size(2), \
+                                  src_images.dim_size(3),\
+                                  ref_image.tensor<T, 4>().data(),\
+                                  src_images.tensor<T, 5>().data(), \
+                                  base_plane.tensor<T, 4>().data(),\
+                                  offsets.tensor<T, 2>().data(),\
+                                  Rs.tensor<T, 4>().data(),\
+                                  Ts.tensor<T, 3>().data(),\
+                                  cost_grad.tensor<T, 4>().data(),\
+                                  cost_mask.tensor<int32, 4>().data(),\
+                                  ref_image_grad->tensor<T, 4>().data(),\
+                                  src_images_grad->tensor<T, 5>().data(),\
+                                  base_plane_grad->tensor<T, 4>().data()
 
 template <typename Device, typename T>
 class CostAggregateGradOp : public OpKernel {
 private:
  COST_REDUCE_METHOD reduce_method_;
+ bool half_centor_;
+
  public:
   explicit CostAggregateGradOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
@@ -157,6 +189,7 @@ private:
       LOG(FATAL) << "Invalid reduce method " << reduce_method
                  << ". Supported types: MEAN, MIN";
     }
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("half_centor", &half_centor_));
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -211,27 +244,16 @@ private:
                             base_plane.shape(),
                             &base_plane_grad));                           
 
-    CostAggregateGradFunctor<Device, T>()(
-                                  ctx->eigen_device<Device>(), reduce_method_,
-                                  batch_size, 
-                                  image_height, 
-                                  image_width,
-                                  image_channels,
-                                  image_depth,
-                                  src_image_num,
-                                  src_images.dim_size(2), 
-                                  src_images.dim_size(3),
-                                  ref_image.tensor<T, 4>().data(),
-                                  src_images.tensor<T, 5>().data(), 
-                                  base_plane.tensor<T, 4>().data(),
-                                  offsets.tensor<T, 2>().data(),
-                                  Rs.tensor<T, 4>().data(),
-                                  Ts.tensor<T, 3>().data(),
-                                  cost_grad.tensor<T, 4>().data(),
-                                  cost_mask.tensor<int32, 4>().data(),
-                                  ref_image_grad->tensor<T, 4>().data(),
-                                  src_images_grad->tensor<T, 5>().data(),
-                                  base_plane_grad->tensor<T, 4>().data());
+    if(half_centor_){
+      CostAggregateGradFunctor<Device, T, true>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_GRAD_ARG_LIST);
+    } else {
+      CostAggregateGradFunctor<Device, T, false>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_GRAD_ARG_LIST);
+    }
+
   }
 private:
   TF_DISALLOW_COPY_AND_ASSIGN(CostAggregateGradOp);

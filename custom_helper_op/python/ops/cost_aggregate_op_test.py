@@ -139,10 +139,10 @@ def combine_projection(ref_cam, src_cam, scale):
         T = tf.matmul(src_K, delta_T)
     return R, T
 
-def build_sampler_coordinate(R, T, base_plane, offsets):
+def build_sampler_coordinate(R, T, base_plane, offsets, half_centor):
     grid = base_plane + offsets[:, None, None, :]
     base_coordinate = index_initializer(tf.concat([tf.shape(base_plane)[1:3], [3, ]], axis=0),
-                                            half_centor=False, dtype=base_plane.dtype)
+                                            half_centor=half_centor, dtype=base_plane.dtype)
 
     coordinate = grid[:, :, :, :, None] * base_coordinate[None, :, :, None, :]
     sample_coodinate = tf.linalg.matvec(R[:, :, None, None, None, :, :], coordinate[:, None, :, :, :, :])
@@ -152,17 +152,17 @@ def build_sampler_coordinate(R, T, base_plane, offsets):
     mask = sample_coodinate[..., 2:3] > 0
     tmp = sample_coodinate
     sample_coodinate = tf.where(mask, sample_coodinate[..., :2]/sample_coodinate[..., 2:3], 0)
-    if False:
-        sample_coodinate = sample_coodinate - tf.constant([0.5, 0.5])
+    if half_centor:
+        sample_coodinate = sample_coodinate - tf.constant([0.5, 0.5], dtype=base_plane.dtype)
 
     return sample_coodinate, grid, tmp
 
 
-def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts, reduce_method="MEAN"):
+def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts, reduce_method="MEAN", half_centor=True):
     image_shape = tf.shape(ref_image)[1:3]
     max_d = tf.shape(offsets)[1]
     src_num = tf.shape(src_images)[1]
-    sample_coordinate1, grid, coordinate = build_sampler_coordinate(Rs, Ts, base_plane, offsets)
+    sample_coordinate1, grid, coordinate = build_sampler_coordinate(Rs, Ts, base_plane, offsets, half_centor)
     sample_coordinate = tf.reshape(sample_coordinate1, (-1, image_shape[0], image_shape[1], max_d, 2))
     valid_range = (sample_coordinate > 0. ) & (sample_coordinate < tf.reverse(tf.cast(image_shape, ref_image.dtype) - 1, axis=(0,))[None, None, None, None, :])
     valid_range = tf.reduce_all(valid_range, axis=-1, keepdims=True)
@@ -177,88 +177,88 @@ def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts, reduc
     return cost, sample_coordinate1, grid, coordinate
 
 class MyOperatorTest(test_util.parameterized.TestCase):
-#   @test_util.parameterized.parameters(
-#     {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
-#     {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
-#     # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
-#     {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
-#     {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':6, "reduce_method": "MEAN"},
-#     # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
-#     {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':5, "reduce_method": "MIN"},
-#     {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
-#     # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
-#     {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':10, "reduce_method": "MIN"},
-#     {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
-#     # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
-#   )
-#   def testCostAggregateSimple(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN"):
-#     batch_ref_image = np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
-#     batch_src_images = np.random.random([BATCH_SIZE, IMAGE_NUM, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
-#     batch_ref_depth = (np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]) + 2)*10
-#     batch_offsets = np.random.random([BATCH_SIZE, IMAGE_DEPTH])*4 - 2
-#     batch_Rs = np.tile(np.diagflat([1., 1., 1.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
-#     batch_Ts = np.tile(np.array([0., 0., 0.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
+  @test_util.parameterized.parameters(
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':6, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':5, "reduce_method": "MIN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':10, "reduce_method": "MIN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':3, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
+    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
+  )
+  def testCostAggregateSimple(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN", half_centor=True):
+    batch_ref_image = np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
+    batch_src_images = np.random.random([BATCH_SIZE, IMAGE_NUM, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS])*10
+    batch_ref_depth = (np.random.random([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]) + 2)*10
+    batch_offsets = np.random.random([BATCH_SIZE, IMAGE_DEPTH])*4 - 2
+    batch_Rs = np.tile(np.diagflat([1., 1., 1.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
+    batch_Ts = np.tile(np.array([0., 0., 0.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
 
 
-#     cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
+    cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
 
-#     cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
-#     else:
-#         cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
+    cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
+    else:
+        cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
 
-#     np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
+    np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
 
-#     print("1: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
+    print("1: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
 
-#     batch_Ts = np.tile(np.array([3., 3., 3.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
-#     cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
+    batch_Ts = np.tile(np.array([3., 3., 3.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
+    cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
 
-#     cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
-#     else:
-#         cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
+    cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
+    else:
+        cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
 
-#     np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
+    np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
 
-#     print("2: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
+    print("2: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
 
 
-#     batch_Rs = np.tile(R.from_rotvec(np.pi/2 * np.array([0, 0, 1])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
-#     cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
+    batch_Rs = np.tile(R.from_rotvec(np.pi/2 * np.array([0, 0, 1])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
+    cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
 
-#     cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
-#     else:
-#         cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
+    cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
+    else:
+        cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
 
-#     np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
+    np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
 
-#     print("3: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
+    print("3: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
 
-#     batch_Rs = np.tile(R.from_rotvec(np.pi/8 * np.array([0, 1, 0])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
-#     cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
+    batch_Rs = np.tile(R.from_rotvec(np.pi/8 * np.array([0, 1, 0])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
+    cost, cost_mask = cost_aggregate(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
 
-#     cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method)
-#     if reduce_method == "MEAN":
-#         cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
-#     else:
-#         cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
+    cost_tfa, sample_coordinate, grid, coordinate = cost_aggregate_tfa(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, half_centor=half_centor)
+    if reduce_method == "MEAN":
+        cost_tfa = tf.where(cost_mask >= IMAGE_NUM, cost_tfa, 0.)
+    else:
+        cost_tfa = tf.where(cost_mask >= 0, cost_tfa, 0.)
 
-#     np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
+    np.testing.assert_allclose(cost_tfa.numpy()[:, 1:-1, 1:-1, :] , cost.numpy()[:, 1:-1, 1:-1, :], rtol=1e-5)
 
-#     print("4: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
+    print("4: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
 
 #   @test_util.parameterized.parameters(
 #     {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':512, 'IMAGE_WIDTH':640, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
@@ -334,66 +334,66 @@ class MyOperatorTest(test_util.parameterized.TestCase):
 #       np.testing.assert_allclose(cost_tfa.numpy() , cost.numpy(), rtol=1e-2, atol=1e-5)
 
 
-  @test_util.parameterized.parameters(
-    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':3, "reduce_method": "MEAN"}
-  )
-  def testCostAggregateGradDataset(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256, reduce_method= "MEAN"):
-    @tf.function
-    def test_check(*args):
-        cost, *_ = cost_aggregate(*args, reduce_method=reduce_method)
-        return tf.reduce_mean(cost)
+#   @test_util.parameterized.parameters(
+#     {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+#     {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+#     # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4, "reduce_method": "MEAN"},
+#     # {'BATCH_SIZE':2, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+#     # {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':4, "reduce_method": "MEAN"},
+#     # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':3, "reduce_method": "MEAN"}
+#   )
+#   def testCostAggregateGradDataset(self, BATCH_SIZE = 1, IMAGE_NUM = 2, IMAGE_HEIGHT = 10, IMAGE_WIDTH = 20, IMAGE_CHANNELS = 32, IMAGE_DEPTH = 256, reduce_method= "MEAN"):
+#     @tf.function
+#     def test_check(*args):
+#         cost, *_ = cost_aggregate(*args, reduce_method=reduce_method)
+#         return tf.reduce_mean(cost)
 
-    mvs_input_list = get_blendedmvs_samples("/home/lucius/data/datasets/mvsnet/dataset_low_res")
-    np.random.shuffle(mvs_input_list)
-    for i in range(10):
-      batch_ref_depth = []
-      batch_ref_image = []
-      batch_src_images = []
-      batch_offsets = []
-      batch_Rs = []
-      batch_Ts = []
-      for b in range(BATCH_SIZE):
-        ref_depth = cv2.imread(mvs_input_list[i*BATCH_SIZE + b][0], cv2.IMREAD_UNCHANGED)
-        ref_image = cv2.imread(mvs_input_list[i*BATCH_SIZE + b][1], cv2.IMREAD_UNCHANGED)
-        ref_cam = load_cam(mvs_input_list[i*BATCH_SIZE + b][2])
-        internal = (ref_cam[1][3][3] - ref_cam[1][3][0])/(IMAGE_DEPTH - 1)
-        batch_offsets.append(0.5*internal*tf.linspace(-IMAGE_DEPTH/2, IMAGE_DEPTH/2 + 1, IMAGE_DEPTH) )
+#     mvs_input_list = get_blendedmvs_samples("/home/lucius/data/datasets/mvsnet/dataset_low_res")
+#     np.random.shuffle(mvs_input_list)
+#     for i in range(10):
+#       batch_ref_depth = []
+#       batch_ref_image = []
+#       batch_src_images = []
+#       batch_offsets = []
+#       batch_Rs = []
+#       batch_Ts = []
+#       for b in range(BATCH_SIZE):
+#         ref_depth = cv2.imread(mvs_input_list[i*BATCH_SIZE + b][0], cv2.IMREAD_UNCHANGED)
+#         ref_image = cv2.imread(mvs_input_list[i*BATCH_SIZE + b][1], cv2.IMREAD_UNCHANGED)
+#         ref_cam = load_cam(mvs_input_list[i*BATCH_SIZE + b][2])
+#         internal = (ref_cam[1][3][3] - ref_cam[1][3][0])/(IMAGE_DEPTH - 1)
+#         batch_offsets.append(0.5*internal*tf.linspace(-IMAGE_DEPTH/2, IMAGE_DEPTH/2 + 1, IMAGE_DEPTH) )
 
-        scale = np.array([IMAGE_HEIGHT, IMAGE_WIDTH, 3.], dtype=np.float)/ref_image.shape
-        src_images = []
-        src_Rs = []
-        src_Ts = []
-        for n in range(IMAGE_NUM):
-          src_images.append(tf.image.resize(cv2.imread(mvs_input_list[i*BATCH_SIZE + b][2*n + 3], cv2.IMREAD_UNCHANGED)/256., (IMAGE_HEIGHT, IMAGE_WIDTH), method='area' ))
-          src_cam = load_cam(mvs_input_list[i*BATCH_SIZE + b][2*n + 4])
-          R, T = combine_projection(ref_cam, src_cam, scale)
-          src_Rs.append(R)
-          src_Ts.append(T)
+#         scale = np.array([IMAGE_HEIGHT, IMAGE_WIDTH, 3.], dtype=np.float)/ref_image.shape
+#         src_images = []
+#         src_Rs = []
+#         src_Ts = []
+#         for n in range(IMAGE_NUM):
+#           src_images.append(tf.image.resize(cv2.imread(mvs_input_list[i*BATCH_SIZE + b][2*n + 3], cv2.IMREAD_UNCHANGED)/256., (IMAGE_HEIGHT, IMAGE_WIDTH), method='area' ))
+#           src_cam = load_cam(mvs_input_list[i*BATCH_SIZE + b][2*n + 4])
+#           R, T = combine_projection(ref_cam, src_cam, scale)
+#           src_Rs.append(R)
+#           src_Ts.append(T)
 
-        batch_ref_depth.append(tf.image.resize(ref_depth[:, :, None], (IMAGE_HEIGHT, IMAGE_WIDTH), method='bilinear'))
-        batch_ref_image.append(tf.image.resize(ref_image/256., (IMAGE_HEIGHT, IMAGE_WIDTH), method='area'))
-        batch_src_images.append(tf.stack(src_images, axis=0))
-        batch_Rs.append(tf.stack(src_Rs, axis=0))
-        batch_Ts.append(tf.stack(src_Ts, axis=0))
+#         batch_ref_depth.append(tf.image.resize(ref_depth[:, :, None], (IMAGE_HEIGHT, IMAGE_WIDTH), method='bilinear'))
+#         batch_ref_image.append(tf.image.resize(ref_image/256., (IMAGE_HEIGHT, IMAGE_WIDTH), method='area'))
+#         batch_src_images.append(tf.stack(src_images, axis=0))
+#         batch_Rs.append(tf.stack(src_Rs, axis=0))
+#         batch_Ts.append(tf.stack(src_Ts, axis=0))
 
 
-      batch_ref_depth = tf.cast(tf.stack(batch_ref_depth, axis=0), tf.float64)
-      batch_ref_image = tf.cast(tf.stack(batch_ref_image, axis=0), tf.float64)
-      batch_src_images = tf.cast(tf.stack(batch_src_images, axis=0), tf.float64)
-      batch_offsets = tf.cast(tf.stack(batch_offsets, axis=0), tf.float64)
-      batch_Rs = tf.cast(tf.stack(batch_Rs, axis=0), tf.float64)
-      batch_Ts = tf.squeeze(tf.cast(tf.stack(batch_Ts, axis=0), tf.float64), axis=-1)
+#       batch_ref_depth = tf.cast(tf.stack(batch_ref_depth, axis=0), tf.float64)
+#       batch_ref_image = tf.cast(tf.stack(batch_ref_image, axis=0), tf.float64)
+#       batch_src_images = tf.cast(tf.stack(batch_src_images, axis=0), tf.float64)
+#       batch_offsets = tf.cast(tf.stack(batch_offsets, axis=0), tf.float64)
+#       batch_Rs = tf.cast(tf.stack(batch_Rs, axis=0), tf.float64)
+#       batch_Ts = tf.squeeze(tf.cast(tf.stack(batch_Ts, axis=0), tf.float64), axis=-1)
 
-      theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
+#       theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
 
-      np.testing.assert_allclose(theoretical[0] , numerical[0], rtol=5e-5, atol=1e-6)
-      np.testing.assert_allclose(theoretical[1] , numerical[1], rtol=5e-5, atol=1e-6)
-      np.testing.assert_allclose(theoretical[2] , numerical[2], rtol=5e-5, atol=1e-6)
+#       np.testing.assert_allclose(theoretical[0] , numerical[0], rtol=5e-5, atol=1e-6)
+#       np.testing.assert_allclose(theoretical[1] , numerical[1], rtol=5e-5, atol=1e-6)
+#       np.testing.assert_allclose(theoretical[2] , numerical[2], rtol=5e-5, atol=1e-6)
 
   @test_util.parameterized.parameters(
     {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':5, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
