@@ -66,7 +66,7 @@ __global__ void CostAggregateKernel(const INDEX_TYPE virtual_thread,
     const T ref_h = h*depth;
 
     T cost = T(0.);
-    int32 used_sample = (reduce_method == COST_REDUCE_MEAN?0:-1);
+    int32 used_sample = 0;
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
@@ -94,32 +94,100 @@ __global__ void CostAggregateKernel(const INDEX_TYPE virtual_thread,
         const T *src_channels_cc = &src_channels_fc[src_image_height_step];
         const T *src_channels_cf = &src_channels_ff[src_image_height_step];
 
-        T curr_cost = T(0.);
         for(int cc = 0; cc < image_channels; cc++){
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
                                   coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
           T diff = src_sample - ref_channels[cc];
-          curr_cost += diff*diff;
+          cost += diff*diff;
         }
-
-        if(reduce_method == COST_REDUCE_MEAN){
-          cost += curr_cost;
-          used_sample = used_sample + 1;
-        } else {
-          if(cost > curr_cost){
-            cost = curr_cost;
-            used_sample = n;
-          }
-        }
+        used_sample = used_sample + 1;
       }
     }
     cost_mask_data[i] = used_sample;
     if(used_sample > 0){
-      if(reduce_method == COST_REDUCE_MEAN){
-        cost_data[i] = cost/static_cast<T>(used_sample*image_channels);
-      } else {
-        cost_data[i] = cost/static_cast<T>(image_channels);
+      cost_data[i] = cost/static_cast<T>(used_sample*image_channels);
+    } else {
+      cost_data[i] = T(0);
+    }
+  }
+}
+
+template <typename T, typename INDEX_TYPE>
+__global__ void CostAggregateKernel<T, INDEX_TYPE, COST_REDUCE_MIN>(const INDEX_TYPE virtual_thread, 
+              const INDEX_TYPE batch_size, 
+              const INDEX_TYPE image_height, 
+              const INDEX_TYPE image_width,
+              const INDEX_TYPE image_channels,
+              const INDEX_TYPE image_depth,
+              const INDEX_TYPE src_image_num,
+              const INDEX_TYPE src_image_height, 
+              const INDEX_TYPE src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              T* cost_data,
+              int32* cost_mask_data){
+  const auto src_image_height_step = src_image_width * image_channels;
+  
+  for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
+    const auto batch_step = i/image_depth;
+    const auto d = i%image_depth;
+
+    const auto tmp = batch_step/image_width;
+    const auto w = batch_step%image_width;
+    const auto b = tmp/image_height;
+    const auto h = tmp%image_height;
+
+    const T * ref_channels = &ref_image_data[batch_step * image_channels];
+
+    const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
+    const T ref_w = w*depth;
+    const T ref_h = h*depth;
+
+    T cost = T(0.);
+    int32 used_sample = 0;
+    for(INDEX_TYPE n = 0; n < src_image_num; n++){
+      const T *R = &Rs_data[(b*src_image_num + n)*9];
+      const T *t = &Ts_data[(b*src_image_num + n)*3];
+
+      T src_z = R[6] * ref_w + R[7] * ref_h + R[8] * depth + t[2];
+      if(src_z <= 0.0f){
+        continue;
       }
+      T src_w = (R[0] * ref_w + R[1] * ref_h + R[2] * depth + t[0])/src_z;
+      T src_h = (R[3] * ref_w + R[4] * ref_h + R[5] * depth + t[1])/src_z;
+
+      if (src_h >= 0.0f && src_w >= 0.0f &&
+        src_h <= static_cast<T>(src_image_height - 1) && src_w <= static_cast<T>(src_image_width - 1)) {
+        const INDEX_TYPE fh = static_cast<INDEX_TYPE>(src_h);
+        const INDEX_TYPE fw = static_cast<INDEX_TYPE>(src_w);
+        const T dh = src_h - fh;
+        const T dw = src_w - fw;
+        const T coef_ff = dh*dw;
+        const T coef_fc = dh*(1 - dw);
+        const T coef_cc = (1 - dh)*(1 - dw);
+        const T coef_cf = (1 - dh)*dw;
+
+        const T *src_channels_ff = &src_images_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
+        const T *src_channels_fc = &src_channels_ff[image_channels];
+        const T *src_channels_cc = &src_channels_fc[src_image_height_step];
+        const T *src_channels_cf = &src_channels_ff[src_image_height_step];
+
+        for(int cc = 0; cc < image_channels; cc++){
+          T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
+                                  coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
+          T diff = src_sample - ref_channels[cc];
+          cost += diff*diff;
+        }
+        used_sample = used_sample + 1;
+      }
+    }
+    cost_mask_data[i] = used_sample;
+    if(used_sample > 0){
+      cost_data[i] = cost/static_cast<T>(used_sample*image_channels);
     } else {
       cost_data[i] = T(0);
     }
@@ -283,7 +351,7 @@ __global__ void CostAggregateGradKernel(const INDEX_TYPE virtual_thread,
     T cost_grad = cost_grad_data[i]/static_cast<T>(cost_mask_data[i]*static_cast<int32>(image_channels));
 
     T depth_grad = T(0);
-    for(INDEX_TYPE n = (reduce_method == COST_REDUCE_MEAN?0:cost_mask_data[i]); n < (reduce_method == COST_REDUCE_MEAN?src_image_num:(cost_mask_data[i] + 1)); n++){
+    for(INDEX_TYPE n = 0; n < src_image_num; n++){
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
