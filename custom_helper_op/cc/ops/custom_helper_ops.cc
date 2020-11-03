@@ -57,6 +57,20 @@ Status CostAggregateShapeFn(InferenceContext *c) {
   return Status::OK();
 }
 
+// TODO(qyu): Move this to core/framework/common_shape_fns.h
+Status SparseConv2DShapeFn(InferenceContext *c) {
+  ShapeHandle image_shape;
+  TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &image_shape));
+  ShapeHandle filter_shape;
+  TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 4, &filter_shape));
+  auto batch_dim = c->Dim(image_shape, 0);
+  auto height    = c->Dim(image_shape, 1);
+  auto width     = c->Dim(image_shape, 2);
+  auto channels_dim = c->Dim(filter_shape, 3);
+  c->set_output(0, c->MakeShape({batch_dim, height, width, channels_dim}));
+  return Status::OK();
+}
+
 static const char kCostVolumeDoc[] = R"doc(
 Applies the given transform to each of the images.
 
@@ -236,6 +250,34 @@ REGISTER_OP("CostAggregateGrad")
       return Status::OK();
     })
     .Doc(kCostAggregateGradDoc);
+
+// V2 op supports output_shape.
+REGISTER_OP("SparseConv2D")
+    .Input("input: T")
+    .Input("filter: T")
+    .Input("base_plane: T")
+    .Input("offsets: T")
+    .Output("output: T")
+    .Attr("T: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .SetShapeFn(SparseConv2DShapeFn);
+
+// V2 op supports output_shape.
+REGISTER_OP("SparseConv2DGrad")
+    .Input("input: T")
+    .Input("filter: T")
+    .Input("base_plane: T")
+    .Input("offsets: T")
+    .Output("output: T")
+    .Attr("T: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int) = [1, 1, 1, 1]")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
+
 
 // V2 op supports output_shape.
 REGISTER_OP("IndexInitializer")

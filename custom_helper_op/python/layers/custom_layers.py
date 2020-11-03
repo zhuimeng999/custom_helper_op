@@ -40,4 +40,21 @@ class CostMapLayer(tf.keras.layers.Layer):
         else:
             cost = tf.where(cost_mask >= 0, cost, self.default_cost)
         return cost, cost_mask
+
+class SparseConv2DLayer(tf.keras.layers.Layer):
+    def __init__(self, reduce_method="MIN", half_centor=True, **kwargs):
+        super(SparseConv2DLayer, self).__init__(**kwargs)
+        assert reduce_method in ["MEAN", "MIN"]
+
+        self.default_cost = self.add_weight('default_cost', 1, initializer="zeros", trainable=True)
+        self.reduce_method = reduce_method
+        self.half_centor = half_centor
+
+    def call(self, inputs, **kwargs):
+        cost, cost_mask = cost_aggregate(*inputs, reduce_method=self.reduce_method, half_centor=self.half_centor)
+        if self.reduce_method == "MEAN":
+            cost = tf.where(cost_mask > 0, cost, self.default_cost)
+        else:
+            cost = tf.where(cost_mask >= 0, cost, self.default_cost)
+        return cost, cost_mask
          

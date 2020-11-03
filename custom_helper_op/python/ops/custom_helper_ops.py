@@ -80,6 +80,38 @@ def _cost_aggregate_grad(op, grad_out, grad_mask):
 
 tf.no_gradient("CostAggregateGrad")
 
+@tf.function
+def sparse_conv2d(ref_image, src_images, base_plane, offsets, Rs, Ts, reduce_method="MEAN", half_centor=True, name=None):
+    with tf.name_scope(name or "cost_aggregate"):
+        offsets = tf.convert_to_tensor(offsets, name="offsets")
+        rs = tf.convert_to_tensor(Rs, name="Rs")
+        ts = tf.convert_to_tensor(Ts, name="Ts")
+        return _custom_helper_ops.sparse_conv2d(ref_image=ref_image, src_images=src_images, base_plane=base_plane, offsets=offsets, rs=rs, ts=ts, reduce_method=reduce_method, half_centor=half_centor)
+
+
+@tf.RegisterGradient("SparseConv2D")
+def _sparse_conv2d_grad(op, grad_out, grad_mask):
+    ref_image, src_images, base_plane, offsets, Rs, Ts = op.inputs
+    cost, cost_mask = op.outputs
+
+    offsets = tf.convert_to_tensor(offsets, name="offsets")
+    rs = tf.convert_to_tensor(Rs, name="Rs")
+    ts = tf.convert_to_tensor(Ts, name="Ts")
+
+    ref_image_grad, src_images_grad, base_plane_grad = _custom_helper_ops.sparse_conv2d_grad(ref_image=ref_image, 
+                                                                                          src_images=src_images, 
+                                                                                          base_plane=base_plane, 
+                                                                                          offsets=offsets, 
+                                                                                          rs=rs, 
+                                                                                          ts=ts,
+                                                                                          cost_grad=grad_out,
+                                                                                          cost_mask=cost_mask,
+                                                                                          reduce_method=op.get_attr("reduce_method"),
+                                                                                          half_centor=op.get_attr("half_centor")
+                                                                                          )
+    return [ref_image_grad, src_images_grad, base_plane_grad, None, None, None]
+
+tf.no_gradient("SparseConv2DGrad")
 
 def decode_pfm(contents, name=None):
     """
