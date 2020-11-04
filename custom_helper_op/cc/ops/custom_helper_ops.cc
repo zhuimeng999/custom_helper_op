@@ -253,10 +253,9 @@ REGISTER_OP("CostAggregateGrad")
 
 // V2 op supports output_shape.
 REGISTER_OP("SparseConv2D")
-    .Input("input: T")
+    .Input("images: T")
     .Input("filter: T")
     .Input("base_plane: T")
-    .Input("offsets: T")
     .Output("output: T")
     .Attr("T: {float, double}")
     .Attr("strides: list(int)")

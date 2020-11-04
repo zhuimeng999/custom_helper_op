@@ -80,13 +80,11 @@ def _cost_aggregate_grad(op, grad_out, grad_mask):
 
 tf.no_gradient("CostAggregateGrad")
 
+
 @tf.function
-def sparse_conv2d(ref_image, src_images, base_plane, offsets, Rs, Ts, reduce_method="MEAN", half_centor=True, name=None):
-    with tf.name_scope(name or "cost_aggregate"):
-        offsets = tf.convert_to_tensor(offsets, name="offsets")
-        rs = tf.convert_to_tensor(Rs, name="Rs")
-        ts = tf.convert_to_tensor(Ts, name="Ts")
-        return _custom_helper_ops.sparse_conv2d(ref_image=ref_image, src_images=src_images, base_plane=base_plane, offsets=offsets, rs=rs, ts=ts, reduce_method=reduce_method, half_centor=half_centor)
+def sparse_conv2d(images, filter, base_plane, strides=(1, 1), dilations=(1, 1), name=None):
+    with tf.name_scope(name or "sparse_conv2d"):
+        return _custom_helper_ops.sparse_conv2d(images=images, filter=filter, base_plane=base_plane, strides=strides, dilations=dilations)
 
 
 @tf.RegisterGradient("SparseConv2D")
