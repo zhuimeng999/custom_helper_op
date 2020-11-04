@@ -66,8 +66,8 @@ Status SparseConv2DShapeFn(InferenceContext *c) {
   auto batch_dim = c->Dim(image_shape, 0);
   auto height    = c->Dim(image_shape, 1);
   auto width     = c->Dim(image_shape, 2);
-  auto channels_dim = c->Dim(filter_shape, 3);
-  c->set_output(0, c->MakeShape({batch_dim, height, width, channels_dim}));
+  auto out_channels = c->Dim(filter_shape, 0);
+  c->set_output(0, c->MakeShape({batch_dim, height, width, out_channels}));
   return Status::OK();
 }
 
@@ -253,27 +253,37 @@ REGISTER_OP("CostAggregateGrad")
 
 // V2 op supports output_shape.
 REGISTER_OP("SparseConv2D")
-    .Input("images: T")
-    .Input("filter: T")
-    .Input("base_plane: T")
-    .Output("output: T")
-    .Attr("T: {float, double}")
+    .Input("images: dtype")
+    .Input("filter: dtype")
+    .Input("base_plane: dtype")
+    .Input("default_value: dtype")
+    .Input("offsets: dtype")
+    .Output("output: dtype")
+    .Attr("dtype: {float, double}")
     .Attr("strides: list(int)")
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .SetShapeFn(SparseConv2DShapeFn);
 
 // V2 op supports output_shape.
 REGISTER_OP("SparseConv2DGrad")
-    .Input("input: T")
-    .Input("filter: T")
-    .Input("base_plane: T")
-    .Input("offsets: T")
-    .Output("output: T")
-    .Attr("T: {float, double}")
+    .Input("images: dtype")
+    .Input("filter: dtype")
+    .Input("base_plane: dtype")
+    .Input("default_value: dtype")
+    .Input("offsets: dtype")
+    .Input("out_grad: dtype")
+    .Output("images_grad: dtype")
+    .Output("filter_grad: dtype")
+    .Output("base_plane_grad: dtype")
+    .Output("default_value_grad: dtype")
+    .Attr("dtype: {float, double}")
     .Attr("strides: list(int)")
     .Attr("dilations: list(int) = [1, 1, 1, 1]")
     .SetShapeFn([](InferenceContext* c) {
       c->set_output(0, c->input(0));
+      c->set_output(1, c->input(1));
+      c->set_output(2, c->input(2));
+      c->set_output(3, c->input(3));
       return Status::OK();
     });
 

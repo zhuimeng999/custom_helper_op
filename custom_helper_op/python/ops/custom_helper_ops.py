@@ -82,32 +82,25 @@ tf.no_gradient("CostAggregateGrad")
 
 
 @tf.function
-def sparse_conv2d(images, filter, base_plane, strides=(1, 1), dilations=(1, 1), name=None):
+def sparse_conv2d(images, filter, base_plane, default_value, offsets, strides=(1, 1), dilations=(1, 1), name=None):
     with tf.name_scope(name or "sparse_conv2d"):
-        return _custom_helper_ops.sparse_conv2d(images=images, filter=filter, base_plane=base_plane, strides=strides, dilations=dilations)
+        return _custom_helper_ops.sparse_conv2d(images=images, filter=filter, base_plane=base_plane, default_value=default_value, offsets=offsets, strides=strides, dilations=dilations)
 
 
 @tf.RegisterGradient("SparseConv2D")
-def _sparse_conv2d_grad(op, grad_out, grad_mask):
-    ref_image, src_images, base_plane, offsets, Rs, Ts = op.inputs
-    cost, cost_mask = op.outputs
-
-    offsets = tf.convert_to_tensor(offsets, name="offsets")
-    rs = tf.convert_to_tensor(Rs, name="Rs")
-    ts = tf.convert_to_tensor(Ts, name="Ts")
-
-    ref_image_grad, src_images_grad, base_plane_grad = _custom_helper_ops.sparse_conv2d_grad(ref_image=ref_image, 
-                                                                                          src_images=src_images, 
+def _sparse_conv2d_grad(op, out_grad):
+    images, filter, base_plane, default_value, offsets = op.inputs
+    # cost, cost_mask = op.outputs
+    images_grad, filter_grad, base_plane_grad, default_value_grad = _custom_helper_ops.sparse_conv2d_grad(images=images, 
+                                                                                          filter=filter, 
                                                                                           base_plane=base_plane, 
+                                                                                          default_value=default_value, 
                                                                                           offsets=offsets, 
-                                                                                          rs=rs, 
-                                                                                          ts=ts,
-                                                                                          cost_grad=grad_out,
-                                                                                          cost_mask=cost_mask,
-                                                                                          reduce_method=op.get_attr("reduce_method"),
-                                                                                          half_centor=op.get_attr("half_centor")
+                                                                                          out_grad=out_grad,
+                                                                                          strides=op.get_attr("strides"),
+                                                                                          dilations=op.get_attr("dilations")
                                                                                           )
-    return [ref_image_grad, src_images_grad, base_plane_grad, None, None, None]
+    return [images_grad, filter_grad, base_plane_grad, default_value_grad, None]
 
 tf.no_gradient("SparseConv2DGrad")
 
