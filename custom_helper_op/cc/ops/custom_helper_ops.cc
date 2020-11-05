@@ -289,6 +289,50 @@ REGISTER_OP("SparseConv2DGrad")
 
 
 // V2 op supports output_shape.
+REGISTER_OP("SparseConv3D")
+    .Input("images: dtype")
+    .Input("filters: dtype")
+    .Input("default_value: dtype")
+    .Input("base_plane: int32")
+    .Output("output: dtype")
+    .Attr("dtype: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int)")
+    .SetShapeFn([](InferenceContext *c) {
+      ShapeHandle image_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &image_shape));
+      ShapeHandle filter_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 5, &filter_shape));
+      auto batch_dim = c->Dim(image_shape, 0);
+      auto height    = c->Dim(image_shape, 1);
+      auto width     = c->Dim(image_shape, 2);
+      auto depth     = c->Dim(image_shape, 3);
+      auto out_channel_num = c->Dim(filter_shape, 0);
+      c->set_output(0, c->MakeShape({batch_dim, height, width, depth, out_channel_num}));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
+REGISTER_OP("SparseConv3DGrad")
+    .Input("images: dtype")
+    .Input("filters: dtype")
+    .Input("default_value: dtype")
+    .Input("base_plane: int32")
+    .Input("out_grad: dtype")
+    .Output("images_grad: dtype")
+    .Output("filter_grad: dtype")
+    .Output("default_value_grad: dtype")
+    .Attr("dtype: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int)")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      c->set_output(1, c->input(1));
+      c->set_output(2, c->input(2));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
 REGISTER_OP("IndexInitializer")
     .Input("output_shape: int32")
     .Attr("half_centor: bool")

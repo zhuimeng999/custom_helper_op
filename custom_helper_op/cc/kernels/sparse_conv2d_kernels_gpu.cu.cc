@@ -102,14 +102,14 @@ __global__ void SparseConv2DKernel(const int32 count,
 
 #define SPARSE_CONV2D_ARG_LIST \
               loop_count, \
-              stride_h, \ 
+              stride_h, \
               stride_w, \
               dilation_h,\
               dilations_w,\
               filter_h,\
               filter_w,\
-              batch_size,\ 
-              image_height,\ 
+              batch_size,\
+              image_height,\
               image_width,\
               image_channels,\
               out_channels,\
@@ -122,22 +122,7 @@ __global__ void SparseConv2DKernel(const int32 count,
 
 template <typename T>
 void SparseConv2DFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, 
-              const int stride_h,
-              const int stride_w,
-              const int dilation_h,
-              const int dilations_w,
-              const int filter_h,
-              const int filter_w,
-              const int64 batch_size, 
-              const int64 image_height, 
-              const int64 image_width,
-              const int64 image_channels,
-              const int64 out_channels,
-              const T* images_data,
-              const T* filter_data, 
-              const T* base_plane_data,
-              const T* default_channel_value,
-              const T* offsets_data,
+              SPARSE_CONV_BASE_ARG_DEF_LIST,
               T * out_data)
 {
   auto loop_count = batch_size*image_height*image_width*out_channels;
@@ -242,14 +227,14 @@ __global__ void SparseConv2DGradKernel(const int32 count,
 
 #define SPARSE_CONV2D_GRAD_ARG_LIST \
               loop_count, \
-              stride_h, \ 
+              stride_h, \
               stride_w, \
               dilation_h,\
               dilations_w,\
               filter_h,\
               filter_w,\
-              batch_size,\ 
-              image_height,\ 
+              batch_size,\
+              image_height,\
               image_width,\
               image_channels,\
               out_channels,\
@@ -260,7 +245,7 @@ __global__ void SparseConv2DGradKernel(const int32 count,
               offsets_data,\
               out_grad_data, \
               images_grad_data, \
-              filter_grad_data, \ 
+              filter_grad_data, \
               base_plane_grad_data, \
               default_channel_value_grad 
 
@@ -314,22 +299,7 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
 
 template <typename T>
 void SparseConv2DGradFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& dev, 
-              const int stride_h,
-              const int stride_w,
-              const int dilation_h,
-              const int dilations_w,
-              const int filter_h,
-              const int filter_w,
-              const int64 batch_size, 
-              const int64 image_height, 
-              const int64 image_width,
-              const int64 image_channels,
-              const int64 out_channels,
-              const T* images_data,
-              const T* filter_data, 
-              const T* base_plane_data,
-              const T* default_channel_value,
-              const T* offsets_data,
+              SPARSE_CONV_BASE_ARG_DEF_LIST,
               const T * out_grad_data,
               T * images_grad_data,
               T * filter_grad_data,

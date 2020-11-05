@@ -40,7 +40,8 @@ custom_op_library(
         "cc/kernels/cost_aggregate_kernels_gpu.cu.cc",
 
         "cc/kernels/sparse_conv.h",
-        "cc/kernels/sparse_conv_kernels_gpu.cu.cc",
+        "cc/kernels/sparse_conv2d_kernels_gpu.cu.cc",
+        "cc/kernels/sparse_conv3d_kernels_gpu.cu.cc",
 
         "cc/kernels/deformable_conv_op_gpu.cu.cc",
         "cc/kernels/deformable_conv_op.h",
