@@ -17,6 +17,9 @@ custom_op_library(
         "cc/kernels/cost_aggregate_kernels.cc",
         "cc/kernels/cost_aggregate.h",
 
+        "cc/kernels/feature_aggregate_kernels.cc",
+        "cc/kernels/feature_aggregate.h",
+
         "cc/kernels/sparse_conv_kernels.cc",
         "cc/kernels/sparse_conv.h",
 
@@ -38,6 +41,9 @@ custom_op_library(
 
         "cc/kernels/cost_aggregate.h",
         "cc/kernels/cost_aggregate_kernels_gpu.cu.cc",
+
+        "cc/kernels/feature_aggregate.h",
+        "cc/kernels/feature_aggregate_kernels_gpu.cu.cc",
 
         "cc/kernels/sparse_conv.h",
         "cc/kernels/sparse_conv2d_kernels_gpu.cu.cc",

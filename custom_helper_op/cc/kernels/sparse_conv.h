@@ -74,11 +74,19 @@ void operator()(const Eigen::GpuDevice& d,
 };
 #endif
 
+#define SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST \
+        int kKnownFilterHeight, int kKnownFilterWidth, int kKnownFilterDepth, \
+        int kKnownDilationHeight, int kKnownDilationWidth, int kKnownDilationDepth
+
+#define SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST \
+        kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
+        kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth
+
 #define SPARSE_CONV3D_BASE_ARG_DEF_LIST \
               const int stride_h, \
               const int stride_w, \
               const int stride_d, \
-              const int dilation_h, \
+              const int dilations_h, \
               const int dilations_w, \
               const int dilations_d, \
               const int filter_h, \
@@ -96,7 +104,7 @@ void operator()(const Eigen::GpuDevice& d,
               const int32* base_plane_data
 
 
-template <typename Device, typename T>
+template <typename Device, typename T, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
 struct SparseConv3DFunctor {
 // Computes on device "d": out = out.constant(in(0)),
 void operator()(const Device& d, 
@@ -106,15 +114,15 @@ void operator()(const Device& d,
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T>
-struct SparseConv3DFunctor<Eigen::GpuDevice, T> {
+template <typename T, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
+struct SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST> {
 void operator()(const Eigen::GpuDevice& d, 
               SPARSE_CONV3D_BASE_ARG_DEF_LIST,
               T * out_data);
 };
 #endif
 
-template <typename Device, typename T>
+template <typename Device, typename T, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
 struct SparseConv3DGradFunctor {
 // Computes on device "d": out = out.constant(in(0)),
 void operator()(const Device& d, 
@@ -127,8 +135,8 @@ void operator()(const Device& d,
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T>
-struct SparseConv3DGradFunctor<Eigen::GpuDevice, T> {
+template <typename T, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
+struct SparseConv3DGradFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST> {
 // Computes on device "d": out = out.constant(in(0)),
 void operator()(const Eigen::GpuDevice& d, 
               SPARSE_CONV3D_BASE_ARG_DEF_LIST,

@@ -252,6 +252,52 @@ REGISTER_OP("CostAggregateGrad")
     .Doc(kCostAggregateGradDoc);
 
 // V2 op supports output_shape.
+REGISTER_OP("FeatureAggregate")
+    .Input("src_images: dtype")
+    .Input("base_plane: dtype")
+    .Input("offsets: dtype")
+    .Input("rs: dtype")
+    .Input("ts: dtype")
+    .Attr("dtype: {float32,float64}")
+    .Attr("half_centor: bool")
+    .Output("mapped_feature: dtype")
+    .Output("mapped_mask: int32")
+    .SetShapeFn([](InferenceContext *c) {
+      ShapeHandle src_image_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &src_image_shape));
+      ShapeHandle offsets_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 2, &offsets_shape));
+      auto batch_dim = c->Dim(src_image_shape, 0);
+      auto image_num = c->Dim(src_image_shape, 1);
+      auto height    = c->Dim(src_image_shape, 2);
+      auto width     = c->Dim(src_image_shape, 3);
+      auto channels  = c->Dim(src_image_shape, 4);
+      auto depth     = c->Dim(offsets_shape, 1);
+      c->set_output(0, c->MakeShape({batch_dim, image_num, height, width, depth, channels}));
+      c->set_output(0, c->MakeShape({batch_dim, image_num, height, width, depth, 1}));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
+REGISTER_OP("FeatureAggregateGrad")
+    .Input("src_images: dtype")
+    .Input("base_plane: dtype")
+    .Input("offsets: dtype")
+    .Input("rs: dtype")
+    .Input("ts: dtype")
+    .Input("mapped_feautre_grad: dtype")
+    .Input("mapped_mask: int32")
+    .Attr("dtype: {float32,float64}")
+    .Attr("half_centor: bool")
+    .Output("src_images_grad: dtype")
+    .Output("base_plane_grad: dtype")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      c->set_output(1, c->input(1));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
 REGISTER_OP("SparseConv2D")
     .Input("images: dtype")
     .Input("filter: dtype")
@@ -307,7 +353,7 @@ REGISTER_OP("SparseConv3D")
       auto height    = c->Dim(image_shape, 1);
       auto width     = c->Dim(image_shape, 2);
       auto depth     = c->Dim(image_shape, 3);
-      auto out_channel_num = c->Dim(filter_shape, 0);
+      auto out_channel_num = c->Dim(filter_shape, 4);
       c->set_output(0, c->MakeShape({batch_dim, height, width, depth, out_channel_num}));
       return Status::OK();
     });
