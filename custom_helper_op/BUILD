@@ -69,9 +69,9 @@ py_library(
 py_test(
     name = "cost_volume_op_py_test",
     srcs = [
-        "python/ops/cost_volume_op_test.py"
+        "python/ops/op_tests/cost_volume_op_test.py"
     ],
-    main = "python/ops/cost_volume_op_test.py",
+    main = "python/ops/op_tests/cost_volume_op_test.py",
     deps = [
         ":custom_helper_op",
     ],
@@ -81,9 +81,21 @@ py_test(
 py_test(
     name = "cost_aggregate_op_py_test",
     srcs = [
-        "python/ops/cost_aggregate_op_test.py"
+        "python/ops/op_tests/cost_aggregate_op_test.py"
     ],
-    main = "python/ops/cost_aggregate_op_test.py",
+    main = "python/ops/op_tests/cost_aggregate_op_test.py",
+    deps = [
+        ":custom_helper_op",
+    ],
+    srcs_version = "PY2AND3",
+)
+
+py_test(
+    name = "feature_aggregate_op_py_test",
+    srcs = [
+        "python/ops/op_tests/feature_aggregate_op_test.py"
+    ],
+    main = "python/ops/op_tests/feature_aggregate_op_test.py",
     deps = [
         ":custom_helper_op",
     ],
@@ -93,9 +105,9 @@ py_test(
 py_test(
     name = "sparse_conv_op_py_test",
     srcs = [
-        "python/ops/sparse_conv_op_test.py"
+        "python/ops/op_tests/sparse_conv_op_test.py"
     ],
-    main = "python/ops/sparse_conv_op_test.py",
+    main = "python/ops/op_tests/sparse_conv_op_test.py",
     deps = [
         ":custom_helper_op",
     ],
@@ -105,9 +117,9 @@ py_test(
 py_test(
     name = "index_initializer_op_py_test",
     srcs = [
-        "python/ops/index_initializer_op_test.py"
+        "python/ops/op_tests/index_initializer_op_test.py"
     ],
-    main = "python/ops/index_initializer_op_test.py",
+    main = "python/ops/op_tests/index_initializer_op_test.py",
     deps = [
         ":custom_helper_op",
     ],
@@ -118,9 +130,9 @@ py_test(
 py_test(
     name = "decoder_op_py_test",
     srcs = [
-        "python/ops/decoder_op_test.py"
+        "python/ops/op_tests/decoder_op_test.py"
     ],
-    main = "python/ops/decoder_op_test.py",
+    main = "python/ops/op_tests/decoder_op_test.py",
     deps = [
         ":custom_helper_op",
     ],

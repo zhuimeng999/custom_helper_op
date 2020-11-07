@@ -35,15 +35,15 @@ namespace custom_helper_op {
                                   image_channels,\
                                   image_depth,\
                                   src_image_num,\
-                                  src_images.dim_size(2), \
-                                  src_images.dim_size(3),\
+                                  src_image_height, \
+                                  src_image_width,\
                                   src_images.tensor<T, 5>().data(), \
                                   base_plane.tensor<T, 4>().data(),\
                                   offsets.tensor<T, 2>().data(),\
                                   Rs.tensor<T, 4>().data(),\
                                   Ts.tensor<T, 3>().data(),\
-                                  cost->tensor<T, 4>().data(),\
-                                  cost_mask->tensor<int32, 4>().data()
+                                  mapped_feature->tensor<T, 6>().data(),\
+                                  mapped_mask->tensor<int32, 6>().data()
 
 
 using functor::FeatureAggregateFunctor;
@@ -71,17 +71,19 @@ class FeatureAggregateOp : public OpKernel {
 
     const auto batch_size = src_images.dim_size(0);
     const auto src_image_num = src_images.dim_size(1);
-    const auto image_height = src_images.dim_size(2);
-    const auto image_width = src_images.dim_size(3);
+    const auto src_image_height = src_images.dim_size(2);
+    const auto src_image_width = src_images.dim_size(3);
     const auto image_channels = src_images.dim_size(4);
 
-    const auto image_depth = offsets.dim_size(1);
-
-    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size)
-                      && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
+    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size) && (base_plane.dim_size(3) == 1),
                 errors::InvalidArgument("base_plane must have rank 4, and must compate to src_images"));
+    const auto image_height = base_plane.dim_size(1);
+    const auto image_width = base_plane.dim_size(2);
+
     OP_REQUIRES(ctx, (offsets.shape().dims() == 2) && (offsets.dim_size(0) == batch_size),
                 errors::InvalidArgument("offsets must have rank 2, and must compate to src_images"));
+    const auto image_depth = offsets.dim_size(1);
+
     OP_REQUIRES(ctx, (Rs.shape().dims() == 4) && (Rs.dim_size(0) == batch_size)
                       && (Rs.dim_size(1) == src_image_num) && (Rs.dim_size(2) == 3) && (Rs.dim_size(3) == 3),
                 errors::InvalidArgument("Rs must have rank 2, and must compate to src_images"));
@@ -89,16 +91,16 @@ class FeatureAggregateOp : public OpKernel {
                       && (Ts.dim_size(1) == src_image_num) && (Ts.dim_size(2) == 3),
                 errors::InvalidArgument("Ts must have rank 2, and must compate to src_images"));
 
-    Tensor* cost = nullptr;
+    Tensor* mapped_feature = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,
-                            TensorShape({batch_size, src_image_num, image_height, image_width, image_depth, image_channels}),
-                            &cost));
-    Tensor* cost_mask = nullptr;
+                            TensorShape({batch_size, image_height, image_width, image_depth, src_image_num, image_channels}),
+                            &mapped_feature));
+    Tensor* mapped_mask = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             1,
-                            TensorShape({batch_size, src_image_num, image_height, image_width, image_depth, 1}),
-                            &cost_mask));
+                            TensorShape({batch_size, image_height, image_width, image_depth, src_image_num, 1}),
+                            &mapped_mask));
 
     if(half_centor_){
       FeatureAggregateFunctor<Device, T, true>()(
@@ -120,7 +122,7 @@ private:
 typedef Eigen::GpuDevice GPUDevice;
 
 #define REGISTER(TYPE)                                              \
-  REGISTER_KERNEL_BUILDER(Name("CostAggregate") \
+  REGISTER_KERNEL_BUILDER(Name("FeatureAggregate") \
                               .Device(DEVICE_GPU)                   \
                               .TypeConstraint<TYPE>("dtype"),        \
                           FeatureAggregateOp<GPUDevice, TYPE>)
@@ -146,8 +148,8 @@ TF_CALL_double(REGISTER);
                                   offsets.tensor<T, 2>().data(),\
                                   Rs.tensor<T, 4>().data(),\
                                   Ts.tensor<T, 3>().data(),\
-                                  mapped_feature_grad.tensor<T, 4>().data(),\
-                                  mapped_mask.tensor<int32, 4>().data(),\
+                                  mapped_feature_grad.tensor<T, 6>().data(),\
+                                  mapped_mask.tensor<int32, 6>().data(),\
                                   src_images_grad->tensor<T, 5>().data(),\
                                   base_plane_grad->tensor<T, 4>().data()
 
@@ -170,38 +172,51 @@ private:
     const Tensor& Ts = ctx->input(4);
     const Tensor& mapped_feature_grad = ctx->input(5);
     const Tensor& mapped_mask = ctx->input(6);
+
     OP_REQUIRES(ctx, src_images.shape().dims() == 5,
                 errors::InvalidArgument("src image must have rank 5"));
 
     const auto batch_size = src_images.dim_size(0);
     const auto src_image_num = src_images.dim_size(1);
-    const auto image_height = src_images.dim_size(2);
-    const auto image_width = src_images.dim_size(3);
+    const auto src_image_height = src_images.dim_size(2);
+    const auto src_image_width = src_images.dim_size(3);
     const auto image_channels = src_images.dim_size(4);
 
-    const auto image_depth = offsets.dim_size(1);
-
-    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size)
-                      && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
+    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size) && (base_plane.dim_size(3) == 1),
                 errors::InvalidArgument("base_plane must have rank 4, and must compate to src_images"));
+    const auto image_height = base_plane.dim_size(1);
+    const auto image_width = base_plane.dim_size(2);
+
     OP_REQUIRES(ctx, (offsets.shape().dims() == 2) && (offsets.dim_size(0) == batch_size),
                 errors::InvalidArgument("offsets must have rank 2, and must compate to src_images"));
+    const auto image_depth = offsets.dim_size(1);
+
     OP_REQUIRES(ctx, (Rs.shape().dims() == 4) && (Rs.dim_size(0) == batch_size)
                       && (Rs.dim_size(1) == src_image_num) && (Rs.dim_size(2) == 3) && (Rs.dim_size(3) == 3),
                 errors::InvalidArgument("Rs must have rank 2, and must compate to src_images"));
     OP_REQUIRES(ctx, (Ts.shape().dims() == 3) && (Ts.dim_size(0) == batch_size)
                       && (Ts.dim_size(1) == src_image_num) && (Ts.dim_size(2) == 3),
-                errors::InvalidArgument("Ts must have rank 2, and must compate to src_images"));
+                errors::InvalidArgument("Ts must have rank 3, and must compate to src_images"));
+
+    OP_REQUIRES(ctx, (mapped_feature_grad.shape().dims() == 6) && (mapped_feature_grad.dim_size(0) == batch_size)
+                      && (mapped_feature_grad.dim_size(1) == image_height) && (mapped_feature_grad.dim_size(2) == image_width)
+                      && (mapped_feature_grad.dim_size(3) == image_depth) && (mapped_feature_grad.dim_size(4) == src_image_num) && (mapped_feature_grad.dim_size(5) == image_channels),
+                errors::InvalidArgument("mapped_feature_grad must have rank 6, and must compate to src_images, got ", mapped_feature_grad.shape().DebugString()));
+
+    OP_REQUIRES(ctx, (mapped_mask.shape().dims() == 6) && (mapped_mask.dim_size(0) == batch_size)
+                      && (mapped_mask.dim_size(1) == image_height) && (mapped_mask.dim_size(2) == image_width)
+                      && (mapped_mask.dim_size(3) == image_depth) && (mapped_mask.dim_size(4) == src_image_num) && (mapped_mask.dim_size(5) == 1),
+                errors::InvalidArgument("mapped_mask must have rank 6, and must compate to src_images"));
 
     Tensor* src_images_grad = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
-                            1,
+                            0,
                             src_images.shape(),
                             &src_images_grad));
 
      Tensor* base_plane_grad = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
-                            2,
+                            1,
                             base_plane.shape(),
                             &base_plane_grad));                           
 
@@ -225,7 +240,7 @@ private:
 typedef Eigen::GpuDevice GPUDevice;
 
 #define REGISTER(TYPE)                                              \
-  REGISTER_KERNEL_BUILDER(Name("CostAggregateGrad") \
+  REGISTER_KERNEL_BUILDER(Name("FeatureAggregateGrad") \
                               .Device(DEVICE_GPU)                   \
                               .TypeConstraint<TYPE>("dtype"),        \
                           FeatureAggregateGradOp<GPUDevice, TYPE>)

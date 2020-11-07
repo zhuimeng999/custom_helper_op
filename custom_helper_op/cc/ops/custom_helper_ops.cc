@@ -265,16 +265,18 @@ REGISTER_OP("FeatureAggregate")
     .SetShapeFn([](InferenceContext *c) {
       ShapeHandle src_image_shape;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &src_image_shape));
+      ShapeHandle base_plane_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 4, &base_plane_shape));
       ShapeHandle offsets_shape;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 2, &offsets_shape));
       auto batch_dim = c->Dim(src_image_shape, 0);
       auto image_num = c->Dim(src_image_shape, 1);
-      auto height    = c->Dim(src_image_shape, 2);
-      auto width     = c->Dim(src_image_shape, 3);
+      auto output_height    = c->Dim(base_plane_shape, 1);
+      auto output_width     = c->Dim(base_plane_shape, 2);
       auto channels  = c->Dim(src_image_shape, 4);
-      auto depth     = c->Dim(offsets_shape, 1);
-      c->set_output(0, c->MakeShape({batch_dim, image_num, height, width, depth, channels}));
-      c->set_output(0, c->MakeShape({batch_dim, image_num, height, width, depth, 1}));
+      auto output_depth     = c->Dim(offsets_shape, 1);
+      c->set_output(0, c->MakeShape({batch_dim, output_height, output_width, output_depth, image_num, channels}));
+      c->set_output(1, c->MakeShape({batch_dim, output_height, output_width, output_depth, image_num, 1}));
       return Status::OK();
     });
 
@@ -285,7 +287,7 @@ REGISTER_OP("FeatureAggregateGrad")
     .Input("offsets: dtype")
     .Input("rs: dtype")
     .Input("ts: dtype")
-    .Input("mapped_feautre_grad: dtype")
+    .Input("mapped_feature_grad: dtype")
     .Input("mapped_mask: int32")
     .Attr("dtype: {float32,float64}")
     .Attr("half_centor: bool")

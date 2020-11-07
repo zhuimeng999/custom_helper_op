@@ -17,7 +17,8 @@
 from __future__ import absolute_import
 
 from custom_helper_op.python.ops.custom_helper_ops import (cost_volume, 
-                                                            cost_aggregate, 
+                                                            cost_aggregate,
+                                                            feature_aggregate, 
                                                             index_initializer, 
                                                             decode_pfm, 
                                                             IndexInitializer,

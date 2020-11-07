@@ -80,6 +80,37 @@ def _cost_aggregate_grad(op, grad_out, grad_mask):
 
 tf.no_gradient("CostAggregateGrad")
 
+@tf.function
+def feature_aggregate(src_images, base_plane, offsets, Rs, Ts, half_centor=True, name=None):
+    with tf.name_scope(name or "feature_aggregate"):
+        offsets = tf.convert_to_tensor(offsets, name="offsets")
+        rs = tf.convert_to_tensor(Rs, name="Rs")
+        ts = tf.convert_to_tensor(Ts, name="Ts")
+        return _custom_helper_ops.feature_aggregate(src_images=src_images, base_plane=base_plane, offsets=offsets, rs=rs, ts=ts, half_centor=half_centor)
+
+
+@tf.RegisterGradient("FeatureAggregate")
+def _feature_aggregate_grad(op, grad_out, grad_mask):
+    src_images, base_plane, offsets, Rs, Ts = op.inputs
+    mapped_feature, mapped_mask = op.outputs
+
+    offsets = tf.convert_to_tensor(offsets, name="offsets")
+    rs = tf.convert_to_tensor(Rs, name="Rs")
+    ts = tf.convert_to_tensor(Ts, name="Ts")
+
+    src_images_grad, base_plane_grad = _custom_helper_ops.feature_aggregate_grad(src_images=src_images, 
+                                                                                          base_plane=base_plane, 
+                                                                                          offsets=offsets, 
+                                                                                          rs=rs, 
+                                                                                          ts=ts,
+                                                                                          mapped_feature_grad=grad_out,
+                                                                                          mapped_mask=mapped_mask,
+                                                                                          half_centor=op.get_attr("half_centor")
+                                                                                          )
+    return [src_images_grad, base_plane_grad, None, None, None]
+
+tf.no_gradient("FeatureAggregateGrad")
+
 
 @tf.function
 def sparse_conv2d(images, filter, base_plane, default_value, offsets, strides=(1, 1), dilations=(1, 1), name=None):

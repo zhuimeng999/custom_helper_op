@@ -338,7 +338,7 @@ void SparseConv2DGradFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDe
 }
 
 template struct SparseConv2DGradFunctor<GPUDevice, float>;
-template struct SparseConv2DGradFunctor<GPUDevice, double>;
+// template struct SparseConv2DGradFunctor<GPUDevice, double>;
 } /* functor */
 } /* custom_helper_op */
 } /* tensorflow */

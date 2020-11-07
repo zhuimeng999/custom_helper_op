@@ -48,8 +48,8 @@ struct FeatureAggregateFunctor {
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              T* cost_data,
-              int32* cost_mask_data);
+              T* mapped_feature_data,
+              int32* mapped_mask_data);
 };
 
 #if GOOGLE_CUDA
@@ -70,8 +70,8 @@ struct FeatureAggregateFunctor<Eigen::GpuDevice, T, half_centor> {
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              T* cost_data,
-              int32* cost_mask_data);
+              T* mapped_feature_data,
+              int32* mapped_mask_data);
 };
 #endif
 
@@ -91,8 +91,8 @@ struct FeatureAggregateGradFunctor {
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              const T* cost_data,
-              const int32* cost_mask_data,
+              const T* mapped_feature_grad_data,
+              const int32* mapped_mask_data,
               T* ref_image_grad_data,
               T* src_images_grad_data, 
               T* base_plane_grad_data
@@ -117,8 +117,8 @@ struct FeatureAggregateGradFunctor<Eigen::GpuDevice, T, half_centor> {
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              const T* cost_data,
-              const int32* cost_mask_data,
+              const T* mapped_feature_grad_data,
+              const int32* mapped_mask_data,
               T* src_images_grad_data, 
               T* base_plane_grad_data
                                 );

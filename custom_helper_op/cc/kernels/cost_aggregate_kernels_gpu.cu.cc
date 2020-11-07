@@ -280,9 +280,7 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
                                   base_plane_data, \
                                   offsets_data, \
                                   Rs_data, \
-                                  Ts_data, \ 
-                                  cost_data, \
-                                  cost_mask_data
+                                  Ts_data
 
 // Define the GPU implementation that launches the CUDA kernel.
 template <typename T, bool half_centor>
@@ -302,8 +300,8 @@ void CostAggregateFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              T* cost_data,
-              int32* cost_mask_data
+              T* mapped_feature_data,
+              int32* mapped_mask_data
                                 ) {
     const auto loop_count = batch_size * image_height * image_width * image_depth;
     const auto input_ref_size = batch_size * image_height * image_width * image_channels;
@@ -312,22 +310,22 @@ void CostAggregateFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
       if(reduce_method == COST_REDUCE_MEAN){
         auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateKernel<T, int64, half_centor>, 0, 0);
         CostMeanAggregateKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
-                                  COST_ARG_LIST);
+                                  COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       } else {
         auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateKernel<T, int64, half_centor>, 0, 0);
         CostMinAggregateKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
-                                  COST_ARG_LIST);
+                                  COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       }
 
     } else {
       if(reduce_method == COST_REDUCE_MEAN){
         auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanAggregateKernel<T, int32, half_centor>, 0, 0);
         CostMeanAggregateKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
-                                  COST_ARG_LIST);
+                                  COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       } else {
         auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinAggregateKernel<T, int32, half_centor>, 0, 0);
         CostMinAggregateKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
-                                  COST_ARG_LIST);
+                                  COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       }
     }
 }
@@ -572,7 +570,7 @@ __global__ void CostMinAggregateGradKernel(const INDEX_TYPE virtual_thread,
   }
 }
 
-#define COST_GRAG_ARG_LIST COST_ARG_LIST, ref_image_grad_data, src_images_grad_data, base_plane_grad_data
+#define COST_GRAG_ARG_LIST COST_ARG_LIST, mapped_feature_grad_data, mapped_mask_data, ref_image_grad_data, src_images_grad_data, base_plane_grad_data
 // Zeroes count elements starting at ptr using all threads of a 1-D grid.
 // Note: this function does not synchronize, and therefore the memory range is
 // not guaranteed to be zero until the next kernel launch.
@@ -600,8 +598,8 @@ void CostAggregateGradFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              const T* cost_data,
-              const int32* cost_mask_data,
+              const T* mapped_feature_grad_data,
+              const int32* mapped_mask_data,
               T* ref_image_grad_data,
               T* src_images_grad_data, 
               T* base_plane_grad_data

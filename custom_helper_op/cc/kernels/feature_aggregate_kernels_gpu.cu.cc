@@ -68,50 +68,54 @@ __global__ void FeatureAggregateKernel(const INDEX_TYPE virtual_thread,
     int32 *mapped_mask_id_ptr = &mapped_mask_data[i*src_image_num];
     T * mapped_feature_id_ptr = &mapped_feature_data[i * src_image_num *image_channels];
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
+      auto mapped_feature_channel_ptr = &mapped_feature_id_ptr[n*image_channels];
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
       T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
       T src_z = src_z_coef * depth + t[2];
-      if(src_z <= 0.0f){
-        continue;
-      }
-      T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
-      T src_w_3d = src_w_coef * depth + t[0];
-      T src_w = src_w_3d/src_z;
-      T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
-      T src_h_3d = src_h_coef * depth + t[1];
-      T src_h = src_h_3d/src_z;
-      if(half_centor){
-        src_w = src_w - 0.5;
-        src_h = src_h - 0.5;
-      }
-
-      if (src_h > 0.0f && src_w > 0.0f &&
-        src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
-        const INDEX_TYPE fh = static_cast<INDEX_TYPE>(src_h);
-        const INDEX_TYPE fw = static_cast<INDEX_TYPE>(src_w);
-        const T dh = src_h - fh;
-        const T dw = src_w - fw;
-        const T coef_ff = dh*dw;
-        const T coef_fc = dh*(1 - dw);
-        const T coef_cc = (1 - dh)*(1 - dw);
-        const T coef_cf = (1 - dh)*dw;
-
-        const T *src_channels_ff = &src_images_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
-        const T *src_channels_fc = &src_channels_ff[image_channels];
-        const T *src_channels_cc = &src_channels_fc[src_image_height_step];
-        const T *src_channels_cf = &src_channels_ff[src_image_height_step];
-
-        const auto mapped_feature_channel_ptr = &mapped_feature_id_ptr[n*image_channels];
-        for(int cc = 0; cc < image_channels; cc++){
-          mapped_feature_channel_ptr[cc] = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
-                                  coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
+      if(src_z > 0.0f){
+        T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
+        T src_w_3d = src_w_coef * depth + t[0];
+        T src_w = src_w_3d/src_z;
+        T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
+        T src_h_3d = src_h_coef * depth + t[1];
+        T src_h = src_h_3d/src_z;
+        if(half_centor){
+          src_w = src_w - 0.5;
+          src_h = src_h - 0.5;
         }
-        mapped_mask_id_ptr[n] = 1;
-      } else {
-        mapped_mask_id_ptr[n] = 0;
+
+        if (src_h > 0.0f && src_w > 0.0f &&
+          src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
+          const INDEX_TYPE fh = static_cast<INDEX_TYPE>(src_h);
+          const INDEX_TYPE fw = static_cast<INDEX_TYPE>(src_w);
+          const T dh = src_h - fh;
+          const T dw = src_w - fw;
+          const T coef_ff = dh*dw;
+          const T coef_fc = dh*(1 - dw);
+          const T coef_cc = (1 - dh)*(1 - dw);
+          const T coef_cf = (1 - dh)*dw;
+
+          const T *src_channels_ff = &src_images_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
+          const T *src_channels_fc = &src_channels_ff[image_channels];
+          const T *src_channels_cc = &src_channels_fc[src_image_height_step];
+          const T *src_channels_cf = &src_channels_ff[src_image_height_step];
+
+          for(int cc = 0; cc < image_channels; cc++){
+            mapped_feature_channel_ptr[cc] = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
+                                    coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
+          }
+          mapped_mask_id_ptr[n] = 1;
+          /* skip remainder code */
+          continue;
+        } 
       }
+      /* this should be skip when an valid pixel select */
+      for(int cc = 0; cc < image_channels; cc++){
+        mapped_feature_channel_ptr[cc] = T(0.);
+      }
+      mapped_mask_id_ptr[n] = 0;
     }
   }
 }
@@ -171,9 +175,7 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
                                   base_plane_data, \
                                   offsets_data, \
                                   Rs_data, \
-                                  Ts_data, \
-                                  cost_data, \
-                                  cost_mask_data
+                                  Ts_data
 
 // Define the GPU implementation that launches the CUDA kernel.
 template <typename T, bool half_centor>
@@ -192,20 +194,20 @@ void FeatureAggregateFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              T* cost_data,
-              int32* cost_mask_data
+              T* mapped_feature_data,
+              int32* mapped_mask_data
                                 ) {
     const auto loop_count = static_cast<int64>(batch_size) * image_height * image_width * image_depth;
-    const auto output_size = static_cast<int64>(batch_size) * src_image_num * image_height * image_width * image_depth * image_channels;
-    const auto input_src_size = static_cast<int64>(batch_size) * src_image_num * src_image_height * src_image_width * image_channels;
-    if((output_size > INT32_MAX) || (input_src_size > INT32_MAX) || (loop_count > INT32_MAX)){
+    const auto mapped_feature_size = static_cast<int64>(batch_size) * src_image_num * image_height * image_width * image_depth * image_channels;
+    const auto src_images_size = static_cast<int64>(batch_size) * src_image_num * src_image_height * src_image_width * image_channels;
+    if((mapped_feature_size > INT32_MAX) || (src_images_size > INT32_MAX)){
       auto config = GetGpuLaunchConfigBig(loop_count, dev, FeatureAggregateKernel<T, int64, half_centor>, 0, 0);
       FeatureAggregateKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
-                                COST_ARG_LIST);
+                                COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
     } else {
       auto config = GetGpuLaunchConfigBig(loop_count, dev, FeatureAggregateKernel<T, int32, half_centor>, 0, 0);
       FeatureAggregateKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
-                                COST_ARG_LIST);
+                                COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
     }
 }
 
@@ -229,12 +231,12 @@ __global__ void FeatureAggregateGradKernel(const INDEX_TYPE virtual_thread,
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              const T* cost_grad_data,
-              const int32* cost_mask_data,
+              const T* mapped_feature_grad_data,
+              const int32* mapped_mask_data,
               T* src_images_grad_data, 
               T* base_plane_grad_data
               ){
-  const auto src_image_height_step = src_image_width * image_channels;
+   const auto src_image_height_step = src_image_width * image_channels;
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
     const auto batch_step = i/image_depth;
     const auto d = i%image_depth;
@@ -252,66 +254,77 @@ __global__ void FeatureAggregateGradKernel(const INDEX_TYPE virtual_thread,
       ref_h = ref_h + 0.5;
     }
 
-    int32 *mapped_mask_id_ptr = &mapped_mask_data[i*src_image_num];
-    T * mapped_feature_id_ptr = &mapped_feature_data[i * src_image_num *image_channels];
+    const int32 *mapped_mask_id_ptr = &mapped_mask_data[i*src_image_num];
+    const T * mapped_feature_grad_id_ptr = &mapped_feature_grad_data[i * src_image_num *image_channels];
+    T depth_grad = T(0);
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
+      if(mapped_mask_id_ptr[n] == 0){
+        continue;
+      }
+
+      auto mapped_feature_grad_channel_ptr = &mapped_feature_grad_id_ptr[n*image_channels];
       const T *R = &Rs_data[(b*src_image_num + n)*9];
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
       T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
       T src_z = src_z_coef * depth + t[2];
-      if(src_z <= 0.0f){
-        continue;
-      }
-      T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
-      T src_w_3d = src_w_coef * depth + t[0];
-      T src_w = src_w_3d/src_z;
-      T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
-      T src_h_3d = src_h_coef * depth + t[1];
-      T src_h = src_h_3d/src_z;
-      if(half_centor){
-        src_w = src_w - 0.5;
-        src_h = src_h - 0.5;
-      }
-
-      if (src_h > 0.0f && src_w > 0.0f &&
-        src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
-        const INDEX_TYPE fh = static_cast<INDEX_TYPE>(src_h);
-        const INDEX_TYPE fw = static_cast<INDEX_TYPE>(src_w);
-        const T dh = src_h - fh;
-        const T dw = src_w - fw;
-        const T coef_ff = dh*dw;
-        const T coef_fc = dh*(1 - dw);
-        const T coef_cc = (1 - dh)*(1 - dw);
-        const T coef_cf = (1 - dh)*dw;
-
-        const T *src_channels_ff = &src_images_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
-        T *src_out_channels_ff = &src_images_grad_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
-        const T *src_channels_fc = &src_channels_ff[image_channels];
-        T *src_out_channels_fc = &src_out_channels_ff[image_channels];
-        const T *src_channels_cc = &src_channels_fc[src_image_height_step];
-        T *src_out_channels_cc = &src_out_channels_fc[src_image_height_step];
-        const T *src_channels_cf = &src_channels_ff[src_image_height_step];
-        T *src_out_channels_cf = &src_out_channels_ff[src_image_height_step];
-
-        const auto mapped_feature_channel_ptr = &mapped_feature_id_ptr[n*image_channels];
-        for(int cc = 0; cc < image_channels; cc++){
-          mapped_feature_channel_ptr[cc] = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
-                                  coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
-          GpuAtomicAdd(&src_out_channels_ff[cc], ref_grad*coef_cc);
-          GpuAtomicAdd(&src_out_channels_fc[cc], ref_grad*coef_cf);
-          GpuAtomicAdd(&src_out_channels_cc[cc], ref_grad*coef_ff);
-          GpuAtomicAdd(&src_out_channels_cf[cc], ref_grad*coef_fc);
+      // if(src_z > 0.0f){
+      {
+        T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
+        T src_w_3d = src_w_coef * depth + t[0];
+        T src_w = src_w_3d/src_z;
+        T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
+        T src_h_3d = src_h_coef * depth + t[1];
+        T src_h = src_h_3d/src_z;
+        if(half_centor){
+          src_w = src_w - 0.5;
+          src_h = src_h - 0.5;
         }
-        mapped_mask_id_ptr[n] = 1;
-      } else {
-        mapped_mask_id_ptr[n] = 0;
+
+        // if (src_h > 0.0f && src_w > 0.0f &&
+        //   src_h < static_cast<T>(src_image_height - 1) && src_w < static_cast<T>(src_image_width - 1)) {
+        {
+          const INDEX_TYPE fh = static_cast<INDEX_TYPE>(src_h);
+          const INDEX_TYPE fw = static_cast<INDEX_TYPE>(src_w);
+          const T dh = src_h - fh;
+          const T dw = src_w - fw;
+          const T coef_ff = dh*dw;
+          const T coef_fc = dh*(1 - dw);
+          const T coef_cc = (1 - dh)*(1 - dw);
+          const T coef_cf = (1 - dh)*dw;
+
+          const T *src_channels_ff = &src_images_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
+          T *src_out_channels_ff = &src_images_grad_data[image_channels*(fw + src_image_width*(fh + src_image_height*(n + src_image_num*b)))];
+          const T *src_channels_fc = &src_channels_ff[image_channels];
+          T *src_out_channels_fc = &src_out_channels_ff[image_channels];
+          const T *src_channels_cc = &src_channels_fc[src_image_height_step];
+          T *src_out_channels_cc = &src_out_channels_fc[src_image_height_step];
+          const T *src_channels_cf = &src_channels_ff[src_image_height_step];
+          T *src_out_channels_cf = &src_out_channels_ff[src_image_height_step];
+
+          T h_grad = T(0);
+          T w_grad = T(0);
+          for(int cc = 0; cc < image_channels; cc++){
+            // mapped_feature_channel_ptr[cc] = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
+            //                         coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
+            GpuAtomicAdd(&src_out_channels_ff[cc], mapped_feature_grad_channel_ptr[cc] * coef_cc);
+            GpuAtomicAdd(&src_out_channels_fc[cc], mapped_feature_grad_channel_ptr[cc] * coef_cf);
+            GpuAtomicAdd(&src_out_channels_cc[cc], mapped_feature_grad_channel_ptr[cc] * coef_ff);
+            GpuAtomicAdd(&src_out_channels_cf[cc], mapped_feature_grad_channel_ptr[cc] * coef_fc);
+                    // Update partial gradients wrt relevant warp field entries
+            const auto t1 = src_channels_cc[cc]  - src_channels_cf[cc] - src_channels_fc[cc] + src_channels_ff[cc];
+            h_grad += mapped_feature_grad_channel_ptr[cc]  * (t1 * dw + src_channels_cf[cc] - src_channels_ff[cc]);
+            w_grad += mapped_feature_grad_channel_ptr[cc]  * (t1 * dh + src_channels_fc[cc] - src_channels_ff[cc]);
+          }
+          depth_grad += ((src_h_coef*src_z - src_z_coef*src_h_3d)*h_grad + (src_w_coef*src_z - src_z_coef*src_w_3d)*w_grad)/(src_z * src_z);
+        }
       }
     }
+    GpuAtomicAdd(&base_plane_grad_data[batch_step], depth_grad);
   }
 }
 
-#define COST_GRAG_ARG_LIST COST_ARG_LIST, src_images_grad_data, base_plane_grad_data
+#define COST_GRAG_ARG_LIST COST_ARG_LIST, mapped_feature_grad_data, mapped_mask_data, src_images_grad_data, base_plane_grad_data
 // Zeroes count elements starting at ptr using all threads of a 1-D grid.
 // Note: this function does not synchronize, and therefore the memory range is
 // not guaranteed to be zero until the next kernel launch.
@@ -338,8 +351,8 @@ void FeatureAggregateGradFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
               const T* offsets_data,
               const T* Rs_data,
               const T* Ts_data,
-              const T* cost_data,
-              const int32* cost_mask_data,
+              const T* mapped_feature_grad_data,
+              const int32* mapped_mask_data,
               T* src_images_grad_data, 
               T* base_plane_grad_data
                                 ) {

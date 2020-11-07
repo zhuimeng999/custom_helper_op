@@ -217,7 +217,7 @@ typedef Eigen::GpuDevice GPUDevice;
                           SparseConv2DGradOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
-TF_CALL_double(REGISTER);
+// TF_CALL_double(REGISTER);
 #undef REGISTER
 
 #endif  // GOOGLE_CUDA
@@ -485,7 +485,7 @@ typedef Eigen::GpuDevice GPUDevice;
                           SparseConv3DGradOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
-TF_CALL_double(REGISTER);
+// TF_CALL_double(REGISTER);
 #undef REGISTER
 
 #endif  // GOOGLE_CUDA
