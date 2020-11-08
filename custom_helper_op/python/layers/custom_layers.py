@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 import tensorflow as tf
-from custom_helper_op.python.ops.custom_helper_ops import index_initializer, cost_aggregate, sparse_conv3d
+from custom_helper_op.python.ops.custom_helper_ops import index_initializer, cost_aggregate, sparse_conv3d, cost_volume
 from tensorflow_addons.image import resampler
 
 class DepthProjectLayer(tf.keras.layers.Layer):
@@ -77,9 +77,9 @@ class CostMapLayerV2(tf.keras.layers.Layer):
         return cost, cost_mask
 
 class SparseConv3DLayer(tf.keras.layers.Layer):
-    def __init__(self, filters, kernal_size, default_type='CONSTANT', strides=[1, 1, 1], dilations=[1, 1, 1], use_bias=False, **kwargs):
+    def __init__(self, filters, kernel_size, default_type='CONSTANT', strides=[1, 1, 1], dilations=[1, 1, 1], use_bias=False, **kwargs):
         super(SparseConv3DLayer, self).__init__(**kwargs)
-        assert len(kernal_size) == 3
+        assert len(kernel_size) == 3
         assert len(strides) == 3
         assert len(dilations) == 3
 
@@ -88,7 +88,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
         assert strides[2] == 1
 
         self.filters = filters
-        self.kernal_size = kernal_size
+        self.kernel_size = kernel_size
         self.strides = strides
         self.dilations = dilations
         self.use_bias = use_bias
@@ -97,7 +97,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         images, _ = input_shape
-        self.kernal = self.add_weight(shape=(*self.kernal_size, images[-1], self.filters),
+        self.kernel = self.add_weight(shape=(*self.kernel_size, images[-1], self.filters),
                              initializer='glorot_uniform',
                              trainable=False,
                              dtype=self.dtype,
@@ -118,7 +118,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
 
     def call(self, inputs, **kwargs):
         images, base_plane = inputs
-        out = sparse_conv3d(images, self.kernal, self.default_value, base_plane, strides=self.strides, dilations=self.dilations)
+        out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations)
         if self.use_bias:
             out =  tf.nn.bias_add(out, self.bias)
         return out
