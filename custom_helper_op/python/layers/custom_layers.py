@@ -25,13 +25,22 @@ class DepthProjectLayer(tf.keras.layers.Layer):
         return resampler(image_tensor, sample_index)
 
 class CostMapLayer(tf.keras.layers.Layer):
-    def __init__(self, reduce_method="MIN", half_centor=True, **kwargs):
+    def __init__(self, reduce_method="MIN", half_centor=True, default_type='DYNAMIC', **kwargs):
         super(CostMapLayer, self).__init__(**kwargs)
         assert reduce_method in ["MEAN", "MIN"]
 
-        self.default_cost = self.add_weight('default_cost', 1, initializer="zeros", trainable=True)
         self.reduce_method = reduce_method
         self.half_centor = half_centor
+        self.default_type = default_type
+
+
+    def build(self, input_shape):
+        if self.default_type == 'DYNAMIC':
+            self.default_cost = self.add_weight(shape=[], initializer="zeros", trainable=True, name='CostMapDefault')
+        elif self.default_type == 'CONSTANT':
+            self.default_cost = self.add_weight(shape=[], initializer="zeros", trainable=False, name='CostMapDefault')
+        else:
+            self.default_value = self.default_type
 
     def call(self, inputs, **kwargs):
         cost, cost_mask = cost_aggregate(*inputs, reduce_method=self.reduce_method, half_centor=self.half_centor)
@@ -39,6 +48,32 @@ class CostMapLayer(tf.keras.layers.Layer):
             cost = tf.where(cost_mask > 0, cost, self.default_cost)
         else:
             cost = tf.where(cost_mask >= 0, cost, self.default_cost)
+        return cost, cost_mask
+
+class CostMapLayerV2(tf.keras.layers.Layer):
+    def __init__(self, reduce_method="MIN", half_centor=True, default_type='DYNAMIC', **kwargs):
+        super(CostMapLayerV2, self).__init__(**kwargs)
+        assert reduce_method in ["MEAN", "MIN"]
+
+        self.reduce_method = reduce_method
+        self.half_centor = half_centor
+        self.default_type = default_type
+
+    def build(self, input_shape):
+        ref_image, *_ = input_shape
+        if self.default_type == 'DYNAMIC':
+            self.default_cost = self.add_weight(shape=[ref_image[-1], ], initializer="zeros", trainable=True, name='CostMapV2Default')
+        elif self.default_type == 'CONSTANT':
+            self.default_cost = self.add_weight(shape=[ref_image[-1], ], initializer="zeros", trainable=False, name='CostMapV2Default')
+        else:
+            self.default_value = self.default_type
+
+    def call(self, inputs, **kwargs):
+        cost, cost_mask = cost_volume(*inputs, reduce_method=self.reduce_method, half_centor=self.half_centor)
+        if self.reduce_method == "MEAN":
+            cost = tf.where(cost_mask > 0, cost, self.default_cost[None, None, None, None, :])
+        else:
+            cost = tf.where(cost_mask >= 0, cost, self.default_cost[None, None, None, None, :])
         return cost, cost_mask
 
 class SparseConv3DLayer(tf.keras.layers.Layer):

@@ -28,91 +28,117 @@ limitations under the License.
 namespace tensorflow {
 namespace custom_helper_op {
 
-namespace functor {
+#define COST_FUNCTOR_ARG_LIST \
+                                  batch_size, \
+                                  image_height, \
+                                  image_width,\
+                                  image_channels,\
+                                  image_depth,\
+                                  src_image_num,\
+                                  src_images.dim_size(2), \
+                                  src_images.dim_size(3),\
+                                  ref_image.tensor<T, 4>().data(),\
+                                  src_images.tensor<T, 5>().data(), \
+                                  base_plane.tensor<T, 4>().data(),\
+                                  offsets.tensor<T, 2>().data(),\
+                                  Rs.tensor<T, 4>().data(),\
+                                  Ts.tensor<T, 3>().data(),\
+                                  cost->tensor<T, 5>().data(),\
+                                  cost_mask->tensor<int32, 5>().data()
 
-// Explicit instantiation of the CPU functor.
-typedef Eigen::ThreadPoolDevice CPUDevice;
-
-template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
-void CostVolumeFunctor<Device, T, INTERPOLATION_TYPE>::operator() 
-  (const Device& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor* output_mask){
-    CHECK_EQ(1, 2);
-  }
-
-  template struct CostVolumeFunctor<CPUDevice, float, INTERPOLATION_BILINEAR>;
-
-  template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
-  void CostVolumeGradFunctor<Device, T, INTERPOLATION_TYPE>::operator() 
-    (const Device& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output){
-      CHECK_EQ(1, 2);
-  }
-  template struct CostVolumeGradFunctor<CPUDevice, float, INTERPOLATION_BILINEAR>;
-}  // end namespace functor
-
-typedef Eigen::ThreadPoolDevice CPUDevice;
+using functor::COST_REDUCE_METHOD;
+using functor::COST_REDUCE_MEAN;
+using functor::COST_REDUCE_MIN;
 
 using functor::CostVolumeFunctor;
 using functor::CostVolumeGradFunctor;
-using functor::Interpolation;
-using functor::INTERPOLATION_BILINEAR;
-using functor::INTERPOLATION_NEAREST;
 
 template <typename Device, typename T>
 class CostVolumeOp : public OpKernel {
- private:
-  Interpolation interpolation_;
-
+  private:
+  COST_REDUCE_METHOD reduce_method_;
+  bool half_centor_;
  public:
   explicit CostVolumeOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
-    string interpolation_str;
-    OP_REQUIRES_OK(ctx, ctx->GetAttr("interpolation", &interpolation_str));
-    if (interpolation_str == "BILINEAR") {
-      interpolation_ = INTERPOLATION_BILINEAR;
+    string reduce_method;
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("reduce_method", &reduce_method));
+    if (reduce_method == "MEAN") {
+      reduce_method_ = COST_REDUCE_MEAN;
+    } else if (reduce_method == "MIN") {
+      reduce_method_ = COST_REDUCE_MIN;
     } else {
-      LOG(FATAL) << "Invalid interpolation " << interpolation_str
-                 << ". Supported types: NEAREST, BILINEAR";
+      LOG(FATAL) << "Invalid reduce method " << reduce_method
+                 << ". Supported types: MEAN, MIN";
     }
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("half_centor", &half_centor_));
   }
 
   void Compute(OpKernelContext* ctx) override {
-    const Tensor& images_t = ctx->input(0);
-    const Tensor& transform_t = ctx->input(1);
-    OP_REQUIRES(ctx, images_t.shape().dims() == 5,
-                errors::InvalidArgument("Input images must have rank 4"));
-    OP_REQUIRES(ctx, (transform_t.shape().dims() == 4) && (transform_t.dim_size(3) == 8),
-                errors::InvalidArgument("Input transform must have rank 4, and the last dim must be 8"));
-    OP_REQUIRES(ctx, (transform_t.dim_size(0) == images_t.dim_size(0)) && (transform_t.dim_size(1) == (images_t.dim_size(1) - 1)),
-                errors::InvalidArgument("the first dim of images and transforms must be equal, and the second dim of images and transforms must greater than 1"));
+    const Tensor& ref_image = ctx->input(0);
+    const Tensor& src_images = ctx->input(1);
+    const Tensor& base_plane = ctx->input(2);
+    const Tensor& offsets = ctx->input(3);
+    const Tensor& Rs = ctx->input(4);
+    const Tensor& Ts = ctx->input(5);
 
-    Tensor* output = nullptr;
+    const auto batch_size = ref_image.dim_size(0);
+    const auto image_height = ref_image.dim_size(1);
+    const auto image_width = ref_image.dim_size(2);
+    const auto image_channels = ref_image.dim_size(3);
+    const auto src_image_num = src_images.dim_size(1);
+    const auto image_depth = offsets.dim_size(1);
+    OP_REQUIRES(ctx, ref_image.shape().dims() == 4,
+                errors::InvalidArgument("ref image must have rank 4"));
+    OP_REQUIRES(ctx, (src_images.shape().dims() == 5) && (src_images.dim_size(0) == batch_size)
+                      && (src_images.dim_size(2) == image_height) && (src_images.dim_size(3) == image_width) && (src_images.dim_size(4) == image_channels),
+                errors::InvalidArgument("src_images must have rank 5, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size)
+                      && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
+                errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (offsets.shape().dims() == 2) && (offsets.dim_size(0) == batch_size),
+                errors::InvalidArgument("offsets must have rank 2, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (Rs.shape().dims() == 4) && (Rs.dim_size(0) == batch_size)
+                      && (Rs.dim_size(1) == src_image_num) && (Rs.dim_size(2) == 3) && (Rs.dim_size(3) == 3),
+                errors::InvalidArgument("Rs must have rank 2, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (Ts.shape().dims() == 3) && (Ts.dim_size(0) == batch_size)
+                      && (Ts.dim_size(1) == src_image_num) && (Ts.dim_size(2) == 3),
+                errors::InvalidArgument("Ts must have rank 2, and must compate to ref_image"));
+     
+    Tensor* cost = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,
-                            TensorShape({images_t.dim_size(0), images_t.dim_size(2), images_t.dim_size(3), transform_t.dim_size(2), images_t.dim_size(4)}),
-                            &output));
-    Tensor* output_mask = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_output(
-                            1,
-                            TensorShape({images_t.dim_size(0), images_t.dim_size(2), images_t.dim_size(3), transform_t.dim_size(2), 1}),
-                            &output_mask));
+                            TensorShape({batch_size, image_height, image_width, image_depth, image_channels}),
+                            &cost));
+                          
+    Tensor* cost_mask = nullptr;
+    if(reduce_method_ == COST_REDUCE_MEAN){
+      OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                              1,
+                              TensorShape({batch_size, image_height, image_width, image_depth, 1}),
+                              &cost_mask));
+    } else {
+      OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                              1,
+                              TensorShape({batch_size, image_height, image_width, image_depth, image_channels}),
+                              &cost_mask));
+    }
 
-    if(interpolation_ == INTERPOLATION_BILINEAR){
-      CostVolumeFunctor<Device, T, INTERPOLATION_BILINEAR>()(
-          ctx->eigen_device<Device>(), images_t, transform_t, output, output_mask);
-    } 
+
+    if(half_centor_){
+      CostVolumeFunctor<Device, T, true>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_ARG_LIST);
+    } else {
+      CostVolumeFunctor<Device, T, false>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_ARG_LIST);
+    }
 
   }
+private:
+  TF_DISALLOW_COPY_AND_ASSIGN(CostVolumeOp);
 };
-
-#define REGISTER(TYPE)                                              \
-  REGISTER_KERNEL_BUILDER(Name("CostVolume") \
-                              .Device(DEVICE_CPU)                   \
-                              .TypeConstraint<TYPE>("dtype"),       \
-                          CostVolumeOp<CPUDevice, TYPE>)
-
-TF_CALL_float(REGISTER);
-
-#undef REGISTER
 
 #if GOOGLE_CUDA
 
@@ -125,64 +151,129 @@ typedef Eigen::GpuDevice GPUDevice;
                           CostVolumeOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
+TF_CALL_double(REGISTER);
 
 #undef REGISTER
 
 #endif  // GOOGLE_CUDA
 
+#define COST_FUNCTOR_GRAD_ARG_LIST \
+                                  batch_size, \
+                                  image_height, \
+                                  image_width,\
+                                  image_channels,\
+                                  image_depth,\
+                                  src_image_num,\
+                                  src_images.dim_size(2), \
+                                  src_images.dim_size(3),\
+                                  ref_image.tensor<T, 4>().data(),\
+                                  src_images.tensor<T, 5>().data(), \
+                                  base_plane.tensor<T, 4>().data(),\
+                                  offsets.tensor<T, 2>().data(),\
+                                  Rs.tensor<T, 4>().data(),\
+                                  Ts.tensor<T, 3>().data(),\
+                                  cost_grad.tensor<T, 5>().data(),\
+                                  cost_mask.tensor<int32, 5>().data(),\
+                                  ref_image_grad->tensor<T, 4>().data(),\
+                                  src_images_grad->tensor<T, 5>().data(),\
+                                  base_plane_grad->tensor<T, 4>().data()
 
 template <typename Device, typename T>
 class CostVolumeGradOp : public OpKernel {
- private:
-  Interpolation interpolation_;
+private:
+ COST_REDUCE_METHOD reduce_method_;
+ bool half_centor_;
 
  public:
   explicit CostVolumeGradOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
-    string interpolation_str;
-    OP_REQUIRES_OK(ctx, ctx->GetAttr("interpolation", &interpolation_str));
-    if (interpolation_str == "BILINEAR") {
-      interpolation_ = INTERPOLATION_BILINEAR;
+    string reduce_method;
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("reduce_method", &reduce_method));
+    if (reduce_method == "MEAN") {
+      reduce_method_ = COST_REDUCE_MEAN;
+    } else if (reduce_method == "MIN") {
+      reduce_method_ = COST_REDUCE_MIN;
     } else {
-      LOG(FATAL) << "Invalid interpolation " << interpolation_str
-                 << ". Supported types: NEAREST, BILINEAR";
+      LOG(FATAL) << "Invalid reduce method " << reduce_method
+                 << ". Supported types: MEAN, MIN";
     }
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("half_centor", &half_centor_));
   }
 
   void Compute(OpKernelContext* ctx) override {
-    const Tensor& images_t = ctx->input(0);
-    const Tensor& transform_t = ctx->input(1);
-    const Tensor& transformed_mask = ctx->input(2);
-    const Tensor& grad_t = ctx->input(3);
-    OP_REQUIRES(ctx, images_t.shape().dims() == 5,
-                errors::InvalidArgument("Input images must have rank 5"));
-    OP_REQUIRES(ctx, (transform_t.shape().dims() == 4) && (transform_t.dim_size(3) == 8),
-                errors::InvalidArgument("Input transform must have rank 4, and the last dim must be 8"));
-    OP_REQUIRES(ctx, (transform_t.dim_size(0) == images_t.dim_size(0)) && (transform_t.dim_size(1) == (images_t.dim_size(1) - 1)),
-                errors::InvalidArgument("the first dim of images and transforms must be equal, and the second dim of images and transforms must greater than 1"));
+    const Tensor& ref_image = ctx->input(0);
+    const Tensor& src_images = ctx->input(1);
+    const Tensor& base_plane = ctx->input(2);
+    const Tensor& offsets = ctx->input(3);
+    const Tensor& Rs = ctx->input(4);
+    const Tensor& Ts = ctx->input(5);
 
-    Tensor* output_t = nullptr;
+    const Tensor& cost_grad = ctx->input(6);
+    const Tensor& cost_mask = ctx->input(7);
+
+    const auto batch_size = ref_image.dim_size(0);
+    const auto image_height = ref_image.dim_size(1);
+    const auto image_width = ref_image.dim_size(2);
+    const auto image_channels = ref_image.dim_size(3);
+    const auto src_image_num = src_images.dim_size(1);
+    const auto image_depth = offsets.dim_size(1);
+    OP_REQUIRES(ctx, ref_image.shape().dims() == 4,
+                errors::InvalidArgument("ref image must have rank 4"));
+    OP_REQUIRES(ctx, (src_images.shape().dims() == 5) && (src_images.dim_size(0) == batch_size)
+                      && (src_images.dim_size(2) == image_height) && (src_images.dim_size(3) == image_width) && (src_images.dim_size(4) == image_channels),
+                errors::InvalidArgument("src_images must have rank 5, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size)
+                      && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
+                errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (offsets.shape().dims() == 2) && (offsets.dim_size(0) == batch_size),
+                errors::InvalidArgument("offsets must have rank 2, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (Rs.shape().dims() == 4) && (Rs.dim_size(0) == batch_size)
+                      && (Rs.dim_size(1) == src_image_num) && (Rs.dim_size(2) == 3) && (Rs.dim_size(3) == 3),
+                errors::InvalidArgument("Rs must have rank 2, and must compate to ref_image"));
+    OP_REQUIRES(ctx, (Ts.shape().dims() == 3) && (Ts.dim_size(0) == batch_size)
+                      && (Ts.dim_size(1) == src_image_num) && (Ts.dim_size(2) == 3),
+                errors::InvalidArgument("Ts must have rank 2, and must compate to ref_image"));
+
+    OP_REQUIRES(ctx, (cost_grad.shape().dims() == 5) && (cost_grad.dim_size(0) == batch_size)
+                      && (cost_grad.dim_size(1) == image_height) && (cost_grad.dim_size(2) == image_width) && (cost_mask.dim_size(3) == image_depth) && (cost_grad.dim_size(4) == image_channels),
+                errors::InvalidArgument("cost_grad must have rank 5, and must compate to ref_image"));
+    auto cost_mask_channels = (reduce_method_ == COST_REDUCE_MEAN)?1:image_channels;
+    OP_REQUIRES(ctx, (cost_mask.shape().dims() == 5) && (cost_mask.dim_size(0) == batch_size)
+                      && (cost_mask.dim_size(1) == image_height) && (cost_mask.dim_size(2) == image_width) && (cost_mask.dim_size(3) == image_depth) && (cost_mask.dim_size(4) == cost_mask_channels),
+                errors::InvalidArgument("src_images must have rank 5, and must compate to ref_image"));
+
+    Tensor* ref_image_grad = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,
-                            images_t.shape(),
-                            &output_t));
+                            ref_image.shape(),
+                            &ref_image_grad));
 
-    if(interpolation_ == INTERPOLATION_BILINEAR){
-      CostVolumeGradFunctor<Device, T, INTERPOLATION_BILINEAR>()(
-          ctx->eigen_device<Device>(), images_t, transform_t, transformed_mask, grad_t, output_t);
-    } 
+    Tensor* src_images_grad = nullptr;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            1,
+                            src_images.shape(),
+                            &src_images_grad));
+
+     Tensor* base_plane_grad = nullptr;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            2,
+                            base_plane.shape(),
+                            &base_plane_grad));                           
+
+    if(half_centor_){
+      CostVolumeGradFunctor<Device, T, true>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_GRAD_ARG_LIST);
+    } else {
+      CostVolumeGradFunctor<Device, T, false>()(
+                                    ctx->eigen_device<Device>(), reduce_method_,
+                                    COST_FUNCTOR_GRAD_ARG_LIST);
+    }
+
   }
+private:
+  TF_DISALLOW_COPY_AND_ASSIGN(CostVolumeGradOp);
 };
-
-  #define REGISTER(TYPE)                                              \
-  REGISTER_KERNEL_BUILDER(Name("CostVolumeGrad") \
-                              .Device(DEVICE_CPU)                   \
-                              .TypeConstraint<TYPE>("dtype"),       \
-                          CostVolumeGradOp<CPUDevice, TYPE>)
-
-  TF_CALL_float(REGISTER);
-
-  #undef REGISTER
 
 #if GOOGLE_CUDA
 
@@ -195,7 +286,7 @@ typedef Eigen::GpuDevice GPUDevice;
                           CostVolumeGradOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
-
+TF_CALL_double(REGISTER);
 #undef REGISTER
 
 #endif  // GOOGLE_CUDA

@@ -32,31 +32,103 @@ namespace custom_helper_op {
 // some Eigen device code.
 namespace functor {
 
-enum Interpolation { INTERPOLATION_NEAREST, INTERPOLATION_BILINEAR };
+enum COST_REDUCE_METHOD { COST_REDUCE_MEAN, COST_REDUCE_MIN };
 
-template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
+template <typename Device, typename T, bool half_centor>
 struct CostVolumeFunctor {
-  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor *output_mask);
+  void operator()(const Device& dev, COST_REDUCE_METHOD reduce_method, 
+              const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              T* cost_data,
+              int32* cost_mask_data);
 };
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T, Interpolation INTERPOLATION_TYPE>
-struct CostVolumeFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE> {
-  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, Tensor* output, Tensor *output_mask);
+template <typename T, bool half_centor>
+struct CostVolumeFunctor<Eigen::GpuDevice, T, half_centor> {
+  void operator()(const Eigen::GpuDevice& dev, COST_REDUCE_METHOD reduce_method, 
+               const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              T* cost_data,
+              int32* cost_mask_data);
 };
 #endif
 
-template <typename Device, typename T, Interpolation INTERPOLATION_TYPE>
+template <typename Device, typename T, bool half_centor>
 struct CostVolumeGradFunctor {
-  void operator()(const Device& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output);
+  void operator()(    const Device& dev, COST_REDUCE_METHOD reduce_method, 
+              const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              const T* cost_data,
+              const int32* cost_mask_data,
+              T* ref_image_grad_data,
+              T* src_images_grad_data, 
+              T* base_plane_grad_data
+                                );
 };
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T, Interpolation INTERPOLATION_TYPE>
-struct CostVolumeGradFunctor<Eigen::GpuDevice, T, INTERPOLATION_TYPE> {
-  void operator()(const Eigen::GpuDevice& d, const Tensor& images, const Tensor& transforms, const Tensor& transformed_mask, const Tensor& grad, Tensor* output);
+template <typename T, bool half_centor>
+struct CostVolumeGradFunctor<Eigen::GpuDevice, T, half_centor> {
+  void operator()(    const Eigen::GpuDevice& dev, COST_REDUCE_METHOD reduce_method, 
+              const int64 batch_size, 
+              const int64 image_height, 
+              const int64 image_width,
+              const int64 image_channels,
+              const int64 image_depth,
+              const int64 src_image_num,
+              const int64 src_image_height, 
+              const int64 src_image_width,
+              const T* ref_image_data,
+              const T* src_images_data, 
+              const T* base_plane_data,
+              const T* offsets_data,
+              const T* Rs_data,
+              const T* Ts_data,
+              const T* cost_data,
+              const int32* cost_mask_data,
+              T* ref_image_grad_data,
+              T* src_images_grad_data, 
+              T* base_plane_grad_data
+                                );
 };
 #endif
 

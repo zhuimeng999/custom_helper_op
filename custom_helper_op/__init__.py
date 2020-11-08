@@ -24,7 +24,7 @@ from custom_helper_op.python.ops.custom_helper_ops import (cost_volume,
                                                             IndexInitializer,
                                                             sparse_conv2d,
                                                             sparse_conv3d)
-from custom_helper_op.python.layers.custom_layers import DepthProjectLayer, CostMapLayer, SparseConv3DLayer
+from custom_helper_op.python.layers.custom_layers import DepthProjectLayer, CostMapLayer, CostMapLayerV2, SparseConv3DLayer
 from custom_helper_op.python.layers.deformable_conv2d import (
     DeformableConv2D,
     DeformablePSROIAlign,
