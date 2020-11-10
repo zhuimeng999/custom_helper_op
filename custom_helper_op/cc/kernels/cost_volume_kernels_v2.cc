@@ -51,8 +51,8 @@ using functor::COST_REDUCE_METHOD;
 using functor::COST_REDUCE_MEAN;
 using functor::COST_REDUCE_MIN;
 
-using functor::CostVolumeFunctor;
-using functor::CostVolumeGradFunctor;
+using functor::CostVolumeV2Functor;
+using functor::CostVolumeGradV2Functor;
 
 template <typename Device, typename T>
 class CostVolumeV2Op : public OpKernel {
@@ -132,11 +132,11 @@ class CostVolumeV2Op : public OpKernel {
 
 
     if(half_centor_){
-      CostVolumeFunctor<Device, T, true>()(
+      CostVolumeV2Functor<Device, T, true>()(
                                     ctx->eigen_device<Device>(), reduce_method_,
                                     COST_FUNCTOR_ARG_LIST);
     } else {
-      CostVolumeFunctor<Device, T, false>()(
+      CostVolumeV2Functor<Device, T, false>()(
                                     ctx->eigen_device<Device>(), reduce_method_,
                                     COST_FUNCTOR_ARG_LIST);
     }
@@ -269,11 +269,11 @@ private:
                             &base_plane_grad));                           
 
     if(half_centor_){
-      CostVolumeGradFunctor<Device, T, true>()(
+      CostVolumeGradV2Functor<Device, T, true>()(
                                     ctx->eigen_device<Device>(), reduce_method_,
                                     COST_FUNCTOR_GRAD_ARG_LIST);
     } else {
-      CostVolumeGradFunctor<Device, T, false>()(
+      CostVolumeGradV2Functor<Device, T, false>()(
                                     ctx->eigen_device<Device>(), reduce_method_,
                                     COST_FUNCTOR_GRAD_ARG_LIST);
     }

@@ -35,7 +35,7 @@ namespace functor {
 enum COST_REDUCE_METHOD { COST_REDUCE_MEAN, COST_REDUCE_MIN };
 
 template <typename Device, typename T, bool half_centor>
-struct CostVolumeFunctor {
+struct CostVolumeV2Functor {
   void operator()(const Device& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 
@@ -59,7 +59,7 @@ struct CostVolumeFunctor {
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
 template <typename T, bool half_centor>
-struct CostVolumeFunctor<Eigen::GpuDevice, T, half_centor> {
+struct CostVolumeV2Functor<Eigen::GpuDevice, T, half_centor> {
   void operator()(const Eigen::GpuDevice& dev, COST_REDUCE_METHOD reduce_method, 
                const int64 batch_size, 
               const int64 image_height, 
@@ -82,7 +82,7 @@ struct CostVolumeFunctor<Eigen::GpuDevice, T, half_centor> {
 #endif
 
 template <typename Device, typename T, bool half_centor>
-struct CostVolumeGradFunctor {
+struct CostVolumeGradV2Functor {
   void operator()(    const Device& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 
@@ -110,7 +110,7 @@ struct CostVolumeGradFunctor {
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
 template <typename T, bool half_centor>
-struct CostVolumeGradFunctor<Eigen::GpuDevice, T, half_centor> {
+struct CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor> {
   void operator()(    const Eigen::GpuDevice& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 

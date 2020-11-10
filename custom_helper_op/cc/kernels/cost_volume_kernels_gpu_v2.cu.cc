@@ -299,7 +299,7 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
 
 // Define the GPU implementation that launches the CUDA kernel.
 template <typename T, bool half_centor>
-void CostVolumeFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
+void CostVolumeV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
     const GPUDevice& dev, COST_REDUCE_METHOD reduce_method,
               const int64 batch_size, 
               const int64 image_height, 
@@ -347,10 +347,10 @@ void CostVolumeFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
     }
 }
 
-template struct CostVolumeFunctor<GPUDevice, float, true>;
-template struct CostVolumeFunctor<GPUDevice, float, false>;
-template struct CostVolumeFunctor<GPUDevice, double, true>;
-template struct CostVolumeFunctor<GPUDevice, double, false>;
+template struct CostVolumeV2Functor<GPUDevice, float, true>;
+template struct CostVolumeV2Functor<GPUDevice, float, false>;
+template struct CostVolumeV2Functor<GPUDevice, double, true>;
+template struct CostVolumeV2Functor<GPUDevice, double, false>;
 
 template <typename T, typename INDEX_TYPE, bool half_centor>
 __global__ void CostMeanVolumeGradKernel(const INDEX_TYPE virtual_thread, 
@@ -512,7 +512,7 @@ __global__ void CostMinVolumeGradKernel(const INDEX_TYPE virtual_thread,
   const int sub_channels = image_channels/groups;
 
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
-    const auto cost_mask_channel_ptr = &cost_mask_data[i*image_channels];
+    const auto cost_mask_channel_ptr = &cost_mask_data[i*groups];
     if(cost_mask_channel_ptr[0] < 0){
       continue;
     }
@@ -536,7 +536,7 @@ __global__ void CostMinVolumeGradKernel(const INDEX_TYPE virtual_thread,
       ref_h = ref_h + 0.5;
     }
 
-    const auto cost_grad = &cost_grad_data[i*image_channels];
+    const auto cost_grad = &cost_grad_data[i*groups];
 
     T depth_grad = T(0);
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
@@ -620,7 +620,7 @@ __global__ void SetZeroBig(const INDEX_TYPE count, T* __restrict__ ptr) {
 }
 // Define the GPU implementation that launches the CUDA kernel.
 template <typename T, bool half_centor>
-void CostVolumeGradFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
+void CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
     const GPUDevice& dev, COST_REDUCE_METHOD reduce_method, 
               const int64 batch_size, 
               const int64 image_height, 
@@ -647,7 +647,7 @@ void CostVolumeGradFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
     const auto loop_count = batch_size * image_height * image_width * image_depth;
     const auto input_ref_size = batch_size * image_height * image_width * image_channels;
     const auto input_src_size = batch_size * src_image_num * src_image_height * src_image_width * image_channels;
-    const auto output_size = batch_size * image_height * image_width * image_depth * image_channels;
+    const auto output_size = batch_size * image_height * image_width * image_depth * groups;
 
     if((input_ref_size > INT32_MAX) || (input_src_size > INT32_MAX) || (output_size > INT32_MAX)){
       auto config = GetGpuLaunchConfigBig(input_ref_size, dev, SetZeroBig<T, int64>, 0, 0);
@@ -687,10 +687,10 @@ void CostVolumeGradFunctor<Eigen::GpuDevice, T, half_centor>::operator()(
     }
 }
 
-template struct CostVolumeGradFunctor<GPUDevice, float, true>;
-template struct CostVolumeGradFunctor<GPUDevice, float, false>;
-template struct CostVolumeGradFunctor<GPUDevice, double, true>;
-template struct CostVolumeGradFunctor<GPUDevice, double, false>;
+template struct CostVolumeGradV2Functor<GPUDevice, float, true>;
+template struct CostVolumeGradV2Functor<GPUDevice, float, false>;
+template struct CostVolumeGradV2Functor<GPUDevice, double, true>;
+template struct CostVolumeGradV2Functor<GPUDevice, double, false>;
 }  // end namespace functor
 
 }  // end namespace addons
