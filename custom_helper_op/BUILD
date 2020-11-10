@@ -14,6 +14,9 @@ custom_op_library(
         "cc/kernels/cost_volume_kernels.cc",
         "cc/kernels/cost_volume.h",
 
+        "cc/kernels/cost_volume_kernels_v2.cc",
+        "cc/kernels/cost_volume_v2.h",
+
         "cc/kernels/cost_aggregate_kernels.cc",
         "cc/kernels/cost_aggregate.h",
 
@@ -38,6 +41,9 @@ custom_op_library(
     cuda_srcs = [
         "cc/kernels/cost_volume.h",
         "cc/kernels/cost_volume_kernels_gpu.cu.cc",
+
+        "cc/kernels/cost_volume_v2.h",
+        "cc/kernels/cost_volume_kernels_gpu_v2.cu.cc",
 
         "cc/kernels/cost_aggregate.h",
         "cc/kernels/cost_aggregate_kernels_gpu.cu.cc",
@@ -72,6 +78,18 @@ py_test(
         "python/ops/op_tests/cost_volume_op_test.py"
     ],
     main = "python/ops/op_tests/cost_volume_op_test.py",
+    deps = [
+        ":custom_helper_op",
+    ],
+    srcs_version = "PY2AND3",
+)
+
+py_test(
+    name = "cost_volume_v2_op_py_test",
+    srcs = [
+        "python/ops/op_tests/cost_volume_v2_op_test.py"
+    ],
+    main = "python/ops/op_tests/cost_volume_v2_op_test.py",
     deps = [
         ":custom_helper_op",
     ],

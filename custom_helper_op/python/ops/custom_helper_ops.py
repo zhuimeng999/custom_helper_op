@@ -63,6 +63,40 @@ def _cost_volume_grad(op, grad_out, grad_mask):
 tf.no_gradient("CostVolumeGrad")
 
 @tf.function
+def cost_volume_v2(ref_image, src_images, base_plane, offsets, Rs, Ts, reduce_method="MEAN", groups=None, half_centor=True, name=None):
+    with tf.name_scope(name or "cost_aggregate"):
+        offsets = tf.convert_to_tensor(offsets, name="offsets")
+        rs = tf.convert_to_tensor(Rs, name="Rs")
+        ts = tf.convert_to_tensor(Ts, name="Ts")
+        return _custom_helper_ops.cost_volume_v2(ref_image=ref_image, src_images=src_images, base_plane=base_plane, offsets=offsets, rs=rs, ts=ts, reduce_method=reduce_method, groups=groups, half_centor=half_centor)
+
+
+@tf.RegisterGradient("CostVolumeV2")
+def _cost_volume_grad_v2(op, grad_out, grad_mask):
+    ref_image, src_images, base_plane, offsets, Rs, Ts = op.inputs
+    cost, cost_mask = op.outputs
+
+    offsets = tf.convert_to_tensor(offsets, name="offsets")
+    rs = tf.convert_to_tensor(Rs, name="Rs")
+    ts = tf.convert_to_tensor(Ts, name="Ts")
+
+    ref_image_grad, src_images_grad, base_plane_grad = _custom_helper_ops.cost_volume_grad_v2(ref_image=ref_image, 
+                                                                                          src_images=src_images, 
+                                                                                          base_plane=base_plane, 
+                                                                                          offsets=offsets, 
+                                                                                          rs=rs, 
+                                                                                          ts=ts,
+                                                                                          cost_grad=grad_out,
+                                                                                          cost_mask=cost_mask,
+                                                                                          reduce_method=op.get_attr("reduce_method"),
+                                                                                          groups=op.get_attr('groups'),
+                                                                                          half_centor=op.get_attr("half_centor")
+                                                                                          )
+    return [ref_image_grad, src_images_grad, base_plane_grad, None, None, None]
+
+tf.no_gradient("CostVolumeGradV2")
+
+@tf.function
 def cost_aggregate(ref_image, src_images, base_plane, offsets, Rs, Ts, reduce_method="MEAN", half_centor=True, name=None):
     with tf.name_scope(name or "cost_aggregate"):
         offsets = tf.convert_to_tensor(offsets, name="offsets")
