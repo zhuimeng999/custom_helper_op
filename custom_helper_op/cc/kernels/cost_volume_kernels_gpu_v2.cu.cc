@@ -180,7 +180,7 @@ __global__ void CostMinVolumeKernel(const INDEX_TYPE virtual_thread,
     auto cost_channel_ptr = &cost_data[i*groups];
     auto cost_mask_channel_ptr = &cost_mask_data[i*groups];
     for(int g = 0; g < groups; g++){
-      cost_channel_ptr[g] = std::numeric_limits<T>::max();
+      cost_channel_ptr[g] = std::numeric_limits<T>::min();
       cost_mask_channel_ptr[g] = -1;
     }
     
@@ -228,7 +228,7 @@ __global__ void CostMinVolumeKernel(const INDEX_TYPE virtual_thread,
                                     coef_ff*src_channels_cc[sc] + coef_fc*src_channels_cf[sc];
             cost += src_sample*ref_channels[sc];
           }
-          if(cost_channel_ptr[g] > cost){
+          if(cost_channel_ptr[g] < cost){
             cost_channel_ptr[g] = cost;
             cost_mask_channel_ptr[g] = n;
           }
