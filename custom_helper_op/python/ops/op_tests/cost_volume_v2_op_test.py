@@ -168,7 +168,7 @@ def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts, reduc
     if reduce_method == "MEAN":
       cost = tf.reduce_mean(cost, axis=1)
     else:
-      cost = tf.reduce_min(cost, axis=1)
+      cost = tf.reduce_max(cost, axis=1)
     return cost, sample_coordinate1, grid, coordinate
 
 class SparseConv3DTest(test.TestCase, parameterized.TestCase):
