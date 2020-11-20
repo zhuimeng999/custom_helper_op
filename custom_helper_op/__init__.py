@@ -16,7 +16,7 @@
 
 from __future__ import absolute_import
 
-from custom_helper_op.python.ops.custom_helper_ops import (cost_volume, cost_volume_v2,
+from custom_helper_op.python.ops.custom_helper_ops import (cost_volume, cost_volume_v2, cost_volume_v3,
                                                             cost_aggregate,
                                                             feature_aggregate, 
                                                             index_initializer, 

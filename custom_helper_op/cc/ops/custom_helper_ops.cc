@@ -309,6 +309,70 @@ REGISTER_OP("CostVolumeGradV2")
     });
 
 // V2 op supports output_shape.
+// V2 op supports output_shape.
+REGISTER_OP("CostVolumeV3")
+    .Input("ref_image: dtype")
+    .Input("src_images: dtype")
+    .Input("base_plane: dtype")
+    .Input("offsets: dtype")
+    .Input("rs: dtype")
+    .Input("ts: dtype")
+    .Attr("dtype: {float32,float64}")
+    .Attr("reduce_method: string")
+    .Attr("groups: int")
+    .Attr("half_centor: bool")
+    .Output("cost: dtype")
+    .Output("cost_mask: int32")
+    .SetShapeFn([](InferenceContext *c) {
+      string reduce_method;
+      TF_RETURN_IF_ERROR(c->GetAttr("reduce_method", &reduce_method));
+      int32 groups;
+      TF_RETURN_IF_ERROR(c->GetAttr("groups", &groups));
+      ShapeHandle ref_image_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &ref_image_shape));
+      ShapeHandle offsets_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 2, &offsets_shape));
+      auto batch_dim = c->Dim(ref_image_shape, 0);
+      auto height    = c->Dim(ref_image_shape, 1);
+      auto width     = c->Dim(ref_image_shape, 2);
+      auto channels  = c->Dim(ref_image_shape, 3);
+      auto depth_dim = c->Dim(offsets_shape, 1);
+      // auto channels_value = c->Value(channels);
+      c->set_output(0, c->MakeShape({batch_dim, height, width, depth_dim, 1}));
+      if(reduce_method == "MEAN"){
+        c->set_output(1, c->MakeShape({batch_dim, height, width, depth_dim, 1}));
+      } else {
+        c->set_output(1, c->MakeShape({batch_dim, height, width, depth_dim, 3}));
+      }
+
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
+REGISTER_OP("CostVolumeGradV3")
+    .Input("ref_image: dtype")
+    .Input("src_images: dtype")
+    .Input("base_plane: dtype")
+    .Input("offsets: dtype")
+    .Input("rs: dtype")
+    .Input("ts: dtype")
+    .Input("cost_grad: dtype")
+    .Input("cost_mask: int32")
+    .Attr("dtype: {float32,float64}")
+    .Attr("reduce_method: string")
+    .Attr("groups: int")
+    .Attr("half_centor: bool")
+    .Output("ref_image_grad: dtype")
+    .Output("src_images_grad: dtype")
+    .Output("base_plane_grad: dtype")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      c->set_output(1, c->input(1));
+      c->set_output(2, c->input(2));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
 REGISTER_OP("CostAggregate")
     .Input("ref_image: dtype")
     .Input("src_images: dtype")
