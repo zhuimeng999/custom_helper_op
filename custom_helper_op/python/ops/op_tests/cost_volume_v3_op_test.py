@@ -166,11 +166,11 @@ def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts, reduc
                                         (-1, src_num, image_shape[0], image_shape[1], max_d, 3, image_shape[2]//3))
     ref_image = tf.reshape(ref_image, (-1, image_shape[0], image_shape[1], 3, image_shape[2]//3))
 
-    cost = tf.reduce_min(tf.reduce_mean(tf.square(ref_image[:, None, :, :, None, :, None, :].numpy() - maped_feature_volume[..., None, :, :].numpy()), axis=-1), axis=(-2, -1))
+    cost = tf.reduce_max(tf.reduce_sum(ref_image[:, None, :, :, None, :, None, :].numpy() * maped_feature_volume[..., None, :, :].numpy(), axis=-1), axis=(-2, -1))
     if reduce_method == "MEAN":
       cost = tf.reduce_mean(cost, axis=1)
     else:
-      cost = tf.reduce_min(cost, axis=1)
+      cost = tf.reduce_max(cost, axis=1)
     # cost = tf.reshape(cost, (-1, image_shape[0], image_shape[1], max_d, 1))
     return cost, sample_coordinate1, grid, coordinate
 
@@ -186,7 +186,7 @@ class CostVolumeV3Test(test.TestCase, parameterized.TestCase):
     {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
     # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
     {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':10, "reduce_method": "MIN"},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':500, 'IMAGE_WIDTH':300, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':200, 'IMAGE_WIDTH':100, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
     # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
   )
   def testCostVolumeV3Simple(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN", half_centor=True):
@@ -402,12 +402,12 @@ class CostVolumeV3Test(test.TestCase, parameterized.TestCase):
 #       np.testing.assert_allclose(theoretical[2] , numerical[2], rtol=5e-5, atol=1e-6)
 
   @parameterized.parameters(
-    # {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
-    # # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MEAN"},
-    # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':6, 'IMAGE_WIDTH':7, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
     {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MIN"},
     {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
     # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
@@ -426,10 +426,10 @@ class CostVolumeV3Test(test.TestCase, parameterized.TestCase):
     @tf.function
     def test_check(*args):
         cost, cost_mask = cost_volume_v3(*args, reduce_method=reduce_method, groups=3)
-        # if reduce_method == "MEAN":
-        #     cost = tf.where(cost_mask > 0, cost, 0.)
-        # else:
-        #     cost = tf.where(cost_mask[..., 0:1] >= 0, cost, 0.)
+        if reduce_method == "MEAN":
+            cost = tf.where(cost_mask > 0, cost, 0.)
+        else:
+            cost = tf.where(cost_mask[..., 0:1] >= 0, cost, 0.)
         return tf.reduce_sum(cost)
 
     theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])

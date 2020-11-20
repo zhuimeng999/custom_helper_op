@@ -110,7 +110,7 @@ __global__ void CostMeanVolumeV3Kernel(const INDEX_TYPE virtual_thread,
         const T *src_channels_cc = &src_channels_fc[src_image_height_step];
         const T *src_channels_cf = &src_channels_ff[src_image_height_step];
 
-        T curr_cost = std::numeric_limits<T>::max();
+        T curr_cost = std::numeric_limits<T>::min();
         for(int gs = 0; gs < groups; gs++){
           for(int gsc = 0; gsc < sub_channels; gsc++){
             int sc = gs * sub_channels + gsc;
@@ -121,10 +121,9 @@ __global__ void CostMeanVolumeV3Kernel(const INDEX_TYPE virtual_thread,
           for(int gi = 0; gi < groups; gi++){
             T tmp = T(0.);
             for(int gic = 0; gic < sub_channels; gic++){
-              T diff = src_channel_buffer[gic] - ref_channels[gi * sub_channels + gic];
-              tmp += diff*diff;
+              tmp  += src_channel_buffer[gic] * ref_channels[gi * sub_channels + gic];
             }
-            if(curr_cost > tmp){
+            if(curr_cost < tmp){
               curr_cost = tmp;
             }
           }
@@ -136,7 +135,7 @@ __global__ void CostMeanVolumeV3Kernel(const INDEX_TYPE virtual_thread,
     }
     cost_mask_data[i] = used_sample;
     if(used_sample > 0){
-      cost_data[i] = cost/static_cast<T>(used_sample*sub_channels);
+      cost_data[i] = cost/static_cast<T>(used_sample);
     } else {
       cost_data[i] = 0;
     }
@@ -191,7 +190,7 @@ __global__ void CostMinVolumeV3Kernel(const INDEX_TYPE virtual_thread,
       cost_mask_info_ptr[m] = -1;
     }
 
-    T cost = std::numeric_limits<T>::max();
+    T cost = std::numeric_limits<T>::min();
 
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
       const T *R = &Rs_data[(b*src_image_num + n)*9];
@@ -239,10 +238,9 @@ __global__ void CostMinVolumeV3Kernel(const INDEX_TYPE virtual_thread,
           for(int gi = 0; gi < groups; gi++){
             T tmp = T(0.);
             for(int gic = 0; gic < sub_channels; gic++){
-              T diff = src_channel_buffer[gic] - ref_channels[gi * sub_channels + gic];
-              tmp += diff*diff;
+              tmp += src_channel_buffer[gic] * ref_channels[gi * sub_channels + gic];
             }
-            if(cost > tmp){
+            if(cost < tmp){
               cost = tmp;
               cost_mask_info_ptr[0] = n;
               cost_mask_info_ptr[1] = gi;
@@ -252,11 +250,7 @@ __global__ void CostMinVolumeV3Kernel(const INDEX_TYPE virtual_thread,
         }
       }
     }
-    if(cost_mask_info_ptr[0] >= 0){
-      cost_data[i] = cost/static_cast<T>(sub_channels);
-    } else {
-      cost_data[i] = T(0);
-    }
+    cost_data[i] = cost;
   }
 }
 
@@ -397,6 +391,7 @@ __global__ void CostMeanVolumeGradV3Kernel(const INDEX_TYPE virtual_thread,
               T* src_images_grad_data, 
               T* base_plane_grad_data
               ){
+  T src_channel_buffer[MAX_SUBCHANNELS_SIZE];
   const auto src_image_height_step = src_image_width * image_channels;
   const int sub_channels = image_channels/groups;
 
@@ -423,7 +418,7 @@ __global__ void CostMeanVolumeGradV3Kernel(const INDEX_TYPE virtual_thread,
       ref_h = ref_h + 0.5;
     }
 
-    const auto cost_grad = &cost_grad_data[i*groups];
+    const auto cost_grad = cost_grad_data[i]/static_cast<T>(cost_mask_data[i]);
 
     T depth_grad = T(0);
     for(INDEX_TYPE n = 0; n < src_image_num; n++){
@@ -466,30 +461,39 @@ __global__ void CostMeanVolumeGradV3Kernel(const INDEX_TYPE virtual_thread,
         const T *src_channels_cf = &src_channels_ff[src_image_height_step];
         T *src_out_channels_cf = &src_out_channels_ff[src_image_height_step];
 
+        int max_gi = -1;
+        int max_gs = -1;
+        T curr_cost = std::numeric_limits<T>::min();
+        for(int gs = 0; gs < groups; gs++){
+          for(int gsc = 0; gsc < sub_channels; gsc++){
+            int sc = gs * sub_channels + gsc;
+            src_channel_buffer[gsc] = coef_cc*src_channels_ff[sc] + coef_cf*src_channels_fc[sc] +
+                                    coef_ff*src_channels_cc[sc] + coef_fc*src_channels_cf[sc];
+          }
+
+          for(int gi = 0; gi < groups; gi++){
+            T tmp = T(0.);
+            for(int gic = 0; gic < sub_channels; gic++){
+              tmp  += src_channel_buffer[gic] * ref_channels[gi * sub_channels + gic];
+            }
+            if(curr_cost < tmp){
+              curr_cost = tmp;
+              max_gi = gi;
+              max_gs = gs;
+            }
+          }
+        }
+
         T h_grad = T(0);
         T w_grad = T(0);
-        // for(int g = 0; g < groups; g++){
-        //   int start_pos = g*sub_channels;
-        //   T base_grad = cost_grad[g]/static_cast<T>(cost_mask_data[i]);
-        //   for(int sc = start_pos; sc < (start_pos + sub_channels); sc++){
-        //     T src_sample = coef_cc*src_channels_ff[sc] + coef_cf*src_channels_fc[sc] +
-        //                             coef_ff*src_channels_cc[sc] + coef_fc*src_channels_cf[sc];
-        //     cost += src_sample*ref_channels[sc];
-        //   }
-        //   if(cost_channel_ptr[g] > cost){
-        //     cost_channel_ptr[g] = cost;
-        //     cost_mask_channel_ptr[g] = n;
-        //   }
-        // }
-
-        for(int cc = 0; cc < image_channels; cc++){
+        for(int sc = 0; sc < sub_channels; sc++){
+          int rc = max_gi * sub_channels + sc;
+          int cc = max_gs * sub_channels + sc;
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
                                   coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
-          // T diff = src_sample - ref_channels[cc];
 
-          T base_grad = cost_grad[cc/sub_channels]/static_cast<T>(cost_mask_data[i]);
-          GpuAtomicAdd(&ref_out_channels[cc], base_grad*src_sample);
-          base_grad = base_grad*ref_channels[cc];
+          GpuAtomicAdd(&ref_out_channels[rc], cost_grad*src_sample);
+          T base_grad = cost_grad*ref_channels[rc];
           GpuAtomicAdd(&src_out_channels_ff[cc], base_grad*coef_cc);
           GpuAtomicAdd(&src_out_channels_fc[cc], base_grad*coef_cf);
           GpuAtomicAdd(&src_out_channels_cc[cc], base_grad*coef_ff);
@@ -558,7 +562,6 @@ __global__ void CostMinVolumeGradV3Kernel(const INDEX_TYPE virtual_thread,
       ref_h = ref_h + 0.5;
     }
 
-    T cost_grad = cost_grad_data[i]/static_cast<T>(sub_channels);
     T depth_grad = T(0);
     // for(INDEX_TYPE n = 0; n < src_image_num; n++){
     {
@@ -611,19 +614,17 @@ __global__ void CostMinVolumeGradV3Kernel(const INDEX_TYPE virtual_thread,
           T src_sample = coef_cc*src_channels_ff[cc] + coef_cf*src_channels_fc[cc] +
                                   coef_ff*src_channels_cc[cc] + coef_fc*src_channels_cf[cc];
 
-          T diff = src_sample - ref_channels[rc];
-
-          T ref_grad = 2*diff*cost_grad;
-          GpuAtomicAdd(&ref_out_channels[rc], -ref_grad);
-          GpuAtomicAdd(&src_out_channels_ff[cc], ref_grad*coef_cc);
-          GpuAtomicAdd(&src_out_channels_fc[cc], ref_grad*coef_cf);
-          GpuAtomicAdd(&src_out_channels_cc[cc], ref_grad*coef_ff);
-          GpuAtomicAdd(&src_out_channels_cf[cc], ref_grad*coef_fc);
+          GpuAtomicAdd(&ref_out_channels[rc], cost_grad_data[i]*src_sample);
+          T base_grad = cost_grad_data[i]*ref_channels[rc];
+          GpuAtomicAdd(&src_out_channels_ff[cc], base_grad*coef_cc);
+          GpuAtomicAdd(&src_out_channels_fc[cc], base_grad*coef_cf);
+          GpuAtomicAdd(&src_out_channels_cc[cc], base_grad*coef_ff);
+          GpuAtomicAdd(&src_out_channels_cf[cc], base_grad*coef_fc);
 
           // Update partial gradients wrt relevant warp field entries
           const auto t1 = src_channels_cc[cc]  - src_channels_cf[cc] - src_channels_fc[cc] + src_channels_ff[cc];
-          h_grad += ref_grad * (t1 * dw + src_channels_cf[cc] - src_channels_ff[cc]);
-          w_grad += ref_grad * (t1 * dh + src_channels_fc[cc] - src_channels_ff[cc]);
+          h_grad += base_grad * (t1 * dw + src_channels_cf[cc] - src_channels_ff[cc]);
+          w_grad += base_grad * (t1 * dh + src_channels_fc[cc] - src_channels_ff[cc]);
         }
         depth_grad += ((src_h_coef*src_z - src_z_coef*src_h_3d)*h_grad + (src_w_coef*src_z - src_z_coef*src_w_3d)*w_grad)/(src_z * src_z);
       }
