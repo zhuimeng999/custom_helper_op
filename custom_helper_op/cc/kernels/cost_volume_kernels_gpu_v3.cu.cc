@@ -250,7 +250,12 @@ __global__ void CostMinVolumeV3Kernel(const INDEX_TYPE virtual_thread,
         }
       }
     }
-    cost_data[i] = cost;
+    if(cost_mask_info_ptr[0] >=0){
+      cost_data[i] = cost;
+    } else {
+      cost_data[i] = 0;
+    }
+    
   }
 }
 
