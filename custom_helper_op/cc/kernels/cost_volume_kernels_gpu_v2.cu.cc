@@ -31,7 +31,7 @@ namespace functor {
 typedef Eigen::GpuDevice GPUDevice;
 
 template <typename T, typename INDEX_TYPE, bool half_centor>
-__global__ void CostMeanVolumeKernel(const INDEX_TYPE virtual_thread, 
+__global__ void CostMeanVolumeV2Kernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
               const INDEX_TYPE image_width,
@@ -137,7 +137,7 @@ __global__ void CostMeanVolumeKernel(const INDEX_TYPE virtual_thread,
 }
 
 template <typename T, typename INDEX_TYPE, bool half_centor>
-__global__ void CostMinVolumeKernel(const INDEX_TYPE virtual_thread, 
+__global__ void CostMinVolumeV2Kernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
               const INDEX_TYPE image_width,
@@ -325,23 +325,23 @@ void CostVolumeV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
     const auto output_size = batch_size * image_height * image_width * image_depth * groups;
     if((input_ref_size > INT32_MAX) || (input_src_size > INT32_MAX) || (output_size > INT32_MAX)){
       if(reduce_method == COST_REDUCE_MEAN){
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeKernel<T, int64, half_centor>, 0, 0);
-        CostMeanVolumeKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeV2Kernel<T, int64, half_centor>, 0, 0);
+        CostMeanVolumeV2Kernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       } else {
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeKernel<T, int64, half_centor>, 0, 0);
-        CostMinVolumeKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeV2Kernel<T, int64, half_centor>, 0, 0);
+        CostMinVolumeV2Kernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       }
 
     } else {
       if(reduce_method == COST_REDUCE_MEAN){
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeKernel<T, int32, half_centor>, 0, 0);
-        CostMeanVolumeKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeV2Kernel<T, int32, half_centor>, 0, 0);
+        CostMeanVolumeV2Kernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       } else {
-        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeKernel<T, int32, half_centor>, 0, 0);
-        CostMinVolumeKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        auto config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeV2Kernel<T, int32, half_centor>, 0, 0);
+        CostMinVolumeV2Kernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_ARG_LIST, mapped_feature_data, mapped_mask_data);
       }
     }
@@ -353,7 +353,7 @@ template struct CostVolumeV2Functor<GPUDevice, double, true>;
 template struct CostVolumeV2Functor<GPUDevice, double, false>;
 
 template <typename T, typename INDEX_TYPE, bool half_centor>
-__global__ void CostMeanVolumeGradKernel(const INDEX_TYPE virtual_thread, 
+__global__ void CostMeanVolumeGradV2Kernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
               const INDEX_TYPE image_width,
@@ -486,7 +486,7 @@ __global__ void CostMeanVolumeGradKernel(const INDEX_TYPE virtual_thread,
 }
 
 template <typename T, typename INDEX_TYPE, bool half_centor>
-__global__ void CostMinVolumeGradKernel(const INDEX_TYPE virtual_thread, 
+__global__ void CostMinVolumeGradV2Kernel(const INDEX_TYPE virtual_thread, 
               const INDEX_TYPE batch_size, 
               const INDEX_TYPE image_height, 
               const INDEX_TYPE image_width,
@@ -657,12 +657,12 @@ void CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
       config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int64>, 0, 0);
       SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
       if(reduce_method == COST_REDUCE_MEAN){
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeGradKernel<T, int64, half_centor>, 0, 0);
-        CostMeanVolumeGradKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeGradV2Kernel<T, int64, half_centor>, 0, 0);
+        CostMeanVolumeGradV2Kernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       } else {
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeGradKernel<T, int64, half_centor>, 0, 0);
-        CostMinVolumeGradKernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeGradV2Kernel<T, int64, half_centor>, 0, 0);
+        CostMinVolumeGradV2Kernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       }
 
@@ -675,12 +675,12 @@ void CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
       SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
 
       if(reduce_method == COST_REDUCE_MEAN){
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeGradKernel<T, int32, half_centor>, 0, 0);
-        CostMeanVolumeGradKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeGradV2Kernel<T, int32, half_centor>, 0, 0);
+        CostMeanVolumeGradV2Kernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       } else {
-        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeGradKernel<T, int32, half_centor>, 0, 0);
-        CostMinVolumeGradKernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
+        config = GetGpuLaunchConfigBig(loop_count, dev, CostMinVolumeGradV2Kernel<T, int32, half_centor>, 0, 0);
+        CostMinVolumeGradV2Kernel<T, int32, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
                                   COST_GRAG_ARG_LIST);
       }
 
