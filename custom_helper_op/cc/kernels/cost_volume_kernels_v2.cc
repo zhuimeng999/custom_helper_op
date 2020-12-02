@@ -40,8 +40,7 @@ namespace custom_helper_op {
                                   groups_,\
                                   ref_image.tensor<T, 4>().data(),\
                                   src_images.tensor<T, 5>().data(), \
-                                  base_plane.tensor<T, 4>().data(),\
-                                  offsets.tensor<T, 2>().data(),\
+                                  depth_grid.tensor<T, 4>().data(),\
                                   Rs.tensor<T, 4>().data(),\
                                   Ts.tensor<T, 3>().data(),\
                                   cost->tensor<T, 5>().data(),\
@@ -80,27 +79,24 @@ class CostVolumeV2Op : public OpKernel {
   void Compute(OpKernelContext* ctx) override {
     const Tensor& ref_image = ctx->input(0);
     const Tensor& src_images = ctx->input(1);
-    const Tensor& base_plane = ctx->input(2);
-    const Tensor& offsets = ctx->input(3);
-    const Tensor& Rs = ctx->input(4);
-    const Tensor& Ts = ctx->input(5);
+    const Tensor& depth_grid = ctx->input(2);
+    const Tensor& Rs = ctx->input(3);
+    const Tensor& Ts = ctx->input(4);
 
     const auto batch_size = ref_image.dim_size(0);
     const auto image_height = ref_image.dim_size(1);
     const auto image_width = ref_image.dim_size(2);
     const auto image_channels = ref_image.dim_size(3);
     const auto src_image_num = src_images.dim_size(1);
-    const auto image_depth = offsets.dim_size(1);
+    const auto image_depth = depth_grid.dim_size(3);
     OP_REQUIRES(ctx, ref_image.shape().dims() == 4,
                 errors::InvalidArgument("ref image must have rank 4"));
     OP_REQUIRES(ctx, (src_images.shape().dims() == 5) && (src_images.dim_size(0) == batch_size)
                       && (src_images.dim_size(2) == image_height) && (src_images.dim_size(3) == image_width) && (src_images.dim_size(4) == image_channels),
                 errors::InvalidArgument("src_images must have rank 5, and must compate to ref_image"));
-    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size)
-                      && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
+    OP_REQUIRES(ctx, (depth_grid.shape().dims() == 4) && (depth_grid.dim_size(0) == batch_size)
+                      && (depth_grid.dim_size(1) == image_height) && (depth_grid.dim_size(2) == image_width),
                 errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image"));
-    OP_REQUIRES(ctx, (offsets.shape().dims() == 2) && (offsets.dim_size(0) == batch_size),
-                errors::InvalidArgument("offsets must have rank 2, and must compate to ref_image"));
     OP_REQUIRES(ctx, (Rs.shape().dims() == 4) && (Rs.dim_size(0) == batch_size)
                       && (Rs.dim_size(1) == src_image_num) && (Rs.dim_size(2) == 3) && (Rs.dim_size(3) == 3),
                 errors::InvalidArgument("Rs must have rank 2, and must compate to ref_image"));
@@ -175,15 +171,14 @@ TF_CALL_double(REGISTER);
                                   groups_,\
                                   ref_image.tensor<T, 4>().data(),\
                                   src_images.tensor<T, 5>().data(), \
-                                  base_plane.tensor<T, 4>().data(),\
-                                  offsets.tensor<T, 2>().data(),\
+                                  depth_grid.tensor<T, 4>().data(),\
                                   Rs.tensor<T, 4>().data(),\
                                   Ts.tensor<T, 3>().data(),\
                                   cost_grad.tensor<T, 5>().data(),\
                                   cost_mask.tensor<int32, 5>().data(),\
                                   ref_image_grad->tensor<T, 4>().data(),\
                                   src_images_grad->tensor<T, 5>().data(),\
-                                  base_plane_grad->tensor<T, 4>().data()
+                                  depth_grid_grad->tensor<T, 4>().data()
 
 template <typename Device, typename T>
 class CostVolumeGradV2Op : public OpKernel {
@@ -211,30 +206,27 @@ private:
   void Compute(OpKernelContext* ctx) override {
     const Tensor& ref_image = ctx->input(0);
     const Tensor& src_images = ctx->input(1);
-    const Tensor& base_plane = ctx->input(2);
-    const Tensor& offsets = ctx->input(3);
-    const Tensor& Rs = ctx->input(4);
-    const Tensor& Ts = ctx->input(5);
+    const Tensor& depth_grid = ctx->input(2);
+    const Tensor& Rs = ctx->input(3);
+    const Tensor& Ts = ctx->input(4);
 
-    const Tensor& cost_grad = ctx->input(6);
-    const Tensor& cost_mask = ctx->input(7);
+    const Tensor& cost_grad = ctx->input(5);
+    const Tensor& cost_mask = ctx->input(6);
 
     const auto batch_size = ref_image.dim_size(0);
     const auto image_height = ref_image.dim_size(1);
     const auto image_width = ref_image.dim_size(2);
     const auto image_channels = ref_image.dim_size(3);
     const auto src_image_num = src_images.dim_size(1);
-    const auto image_depth = offsets.dim_size(1);
+    const auto image_depth = depth_grid.dim_size(3);
     OP_REQUIRES(ctx, ref_image.shape().dims() == 4,
                 errors::InvalidArgument("ref image must have rank 4"));
     OP_REQUIRES(ctx, (src_images.shape().dims() == 5) && (src_images.dim_size(0) == batch_size)
                       && (src_images.dim_size(2) == image_height) && (src_images.dim_size(3) == image_width) && (src_images.dim_size(4) == image_channels),
                 errors::InvalidArgument("src_images must have rank 5, and must compate to ref_image"));
-    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == batch_size)
-                      && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
+    OP_REQUIRES(ctx, (depth_grid.shape().dims() == 4) && (depth_grid.dim_size(0) == batch_size)
+                      && (depth_grid.dim_size(1) == image_height) && (depth_grid.dim_size(2) == image_width),
                 errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image"));
-    OP_REQUIRES(ctx, (offsets.shape().dims() == 2) && (offsets.dim_size(0) == batch_size),
-                errors::InvalidArgument("offsets must have rank 2, and must compate to ref_image"));
     OP_REQUIRES(ctx, (Rs.shape().dims() == 4) && (Rs.dim_size(0) == batch_size)
                       && (Rs.dim_size(1) == src_image_num) && (Rs.dim_size(2) == 3) && (Rs.dim_size(3) == 3),
                 errors::InvalidArgument("Rs must have rank 2, and must compate to ref_image"));
@@ -262,11 +254,11 @@ private:
                             src_images.shape(),
                             &src_images_grad));
 
-     Tensor* base_plane_grad = nullptr;
+     Tensor* depth_grid_grad = nullptr;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             2,
-                            base_plane.shape(),
-                            &base_plane_grad));                           
+                            depth_grid.shape(),
+                            &depth_grid_grad));                           
 
     if(half_centor_){
       CostVolumeGradV2Functor<Device, T, true>()(

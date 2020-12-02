@@ -17,7 +17,7 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from tensorflow.python.platform import test
 from absl.testing import parameterized
-from custom_helper_op import cost_volume_v2, index_initializer
+from custom_helper_op import cost_volume_v2, index_initializer, CostMapLayerV2
 import numpy as np
 from tensorflow.python.ops import gradient_checker_v2
 from scipy.spatial.transform import Rotation as R
@@ -171,7 +171,7 @@ def cost_aggregate_tfa(ref_image, src_images, base_plane, offsets, Rs, Ts, reduc
       cost = tf.reduce_max(cost, axis=1)
     return cost, sample_coordinate1, grid, coordinate
 
-class SparseConv3DTest(test.TestCase, parameterized.TestCase):
+class CostVolumeV2Test(test.TestCase, parameterized.TestCase):
   @parameterized.parameters(
     {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
     {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
@@ -186,7 +186,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
     # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
   )
-  def testCostVolumeSimple(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN", half_centor=True):
+  def testCostVolumeV2Simple(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN", half_centor=True):
     batch_ref_image = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS], dtype=tf.float64)*10
     batch_src_images = tf.random.uniform([BATCH_SIZE, IMAGE_NUM, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS], dtype=batch_ref_image.dtype)*10
     batch_ref_depth = (tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], dtype=batch_src_images.dtype) + 2)*10
@@ -194,8 +194,8 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     batch_Rs = tf.cast(np.tile(np.diagflat([1., 1., 1.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1]), batch_src_images.dtype)
     batch_Ts = tf.cast(np.tile(np.array([0., 0., 0.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1]), batch_src_images.dtype)
 
-
-    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
+    depth_grid = batch_ref_depth + batch_offsets[:, None, None, :]
+    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, depth_grid, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
     if reduce_method == "MEAN":
         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
     else:
@@ -212,7 +212,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     print("1: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
 
     batch_Ts = np.tile(np.array([3., 3., 3.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1])
-    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
+    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, depth_grid, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
     if reduce_method == "MEAN":
         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
     else:
@@ -230,7 +230,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
 
 
     batch_Rs = np.tile(R.from_rotvec(np.pi/2 * np.array([0, 0, 1])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
-    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
+    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, depth_grid, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
     if reduce_method == "MEAN":
         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
     else:
@@ -247,7 +247,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     print("3: ",np.max(cost_tfa.numpy()), np.max(cost.numpy()))
 
     batch_Rs = np.tile(R.from_rotvec(np.pi/8 * np.array([0, 1, 0])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
-    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
+    cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, depth_grid, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3, half_centor=half_centor)
     if reduce_method == "MEAN":
         cost = tf.where(cost_mask >= IMAGE_NUM, cost, 0.)
     else:
@@ -399,20 +399,20 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
 #       np.testing.assert_allclose(theoretical[2] , numerical[2], rtol=5e-5, atol=1e-6)
 
   @parameterized.parameters(
-    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':6, 'IMAGE_WIDTH':8, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':8, 'IMAGE_WIDTH':6, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
     # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':8, 'IMAGE_WIDTH':6, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':10, "reduce_method": "MEAN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':8, 'IMAGE_WIDTH':6, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MEAN"},
     # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MIN"},
-    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':1, 'IMAGE_HEIGHT':8, 'IMAGE_WIDTH':6, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':5, "reduce_method": "MIN"},
+    {'BATCH_SIZE':1, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':8, 'IMAGE_WIDTH':6, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':9, "reduce_method": "MIN"},
     # {'BATCH_SIZE':1, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':9, "reduce_method": "MEAN"},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':18, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':10, "reduce_method": "MIN"},
-    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':12, 'IMAGE_WIDTH':16, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':2, 'IMAGE_HEIGHT':8, 'IMAGE_WIDTH':6, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':10, "reduce_method": "MIN"},
+    {'BATCH_SIZE':2, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':8, 'IMAGE_WIDTH':6, 'IMAGE_CHANNELS':9, 'IMAGE_DEPTH':6, "reduce_method": "MIN"},
     # {'BATCH_SIZE':3, 'IMAGE_NUM':3, 'IMAGE_HEIGHT':24, 'IMAGE_WIDTH':32, 'IMAGE_CHANNELS':30, 'IMAGE_DEPTH':13, "reduce_method": "MEAN"},
   )
-  def testCostVolumeGrad(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN"):
+  def testCostVolumeV2Grad(self, BATCH_SIZE = 2, IMAGE_NUM = 2, IMAGE_HEIGHT = 5, IMAGE_WIDTH = 5, IMAGE_CHANNELS = 3, IMAGE_DEPTH = 4, reduce_method= "MEAN"):
     batch_ref_image = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS], dtype=tf.float64)*10
     batch_src_images = tf.random.uniform([BATCH_SIZE, IMAGE_NUM, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNELS], dtype=batch_ref_image.dtype)*10
     batch_ref_depth = (tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], dtype=batch_src_images.dtype) + 2)*10
@@ -420,9 +420,11 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     batch_Rs = tf.cast(np.tile(np.diagflat([1., 1., 1.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1]), batch_src_images.dtype)
     batch_Ts = tf.cast(np.tile(np.array([0., 0., 0.])[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1]), batch_src_images.dtype)
 
+
     @tf.function
-    def test_check(*args):
-        cost, cost_mask = cost_volume_v2(*args, reduce_method=reduce_method, groups=3)
+    def test_check(batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts):
+        depth_grid = batch_ref_depth + batch_offsets[:, None, None, :]
+        cost, cost_mask = cost_volume_v2(batch_ref_image, batch_src_images, depth_grid, batch_Rs, batch_Ts, reduce_method=reduce_method, groups=3)
         if reduce_method == "MEAN":
             cost = tf.where(cost_mask > 0, cost, 0.)
         else:
@@ -449,12 +451,12 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     self.assertAllClose(theoretical[2] , numerical[2], rtol=5e-5)
     print("2: ",np.max(theoretical[0]), np.max(theoretical[1]), np.max(theoretical[2]))
 
-    # batch_Rs = np.tile(R.from_rotvec(np.pi/2 * np.array([0, 0, 1])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
-    # theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
-    # np.testing.assert_allclose(theoretical[0] , numerical[0], rtol=5e-5, atol=1e-6)
-    # np.testing.assert_allclose(theoretical[1] , numerical[1], rtol=5e-5, atol=1e-6)
-    # np.testing.assert_allclose(theoretical[2] , numerical[2], rtol=5e-5, atol=1e-6)
-    # print("3: ",np.max(theoretical[0]), np.max(theoretical[1]), np.max(theoretical[2]))
+    batch_Rs = np.tile(R.from_rotvec(np.pi/2 * np.array([0, 0, 1])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
+    theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])
+    np.testing.assert_allclose(theoretical[0] , numerical[0], rtol=5e-5, atol=1e-6)
+    np.testing.assert_allclose(theoretical[1] , numerical[1], rtol=5e-5, atol=1e-6)
+    np.testing.assert_allclose(theoretical[2] , numerical[2], rtol=5e-5, atol=1e-6)
+    print("3: ",np.max(theoretical[0]), np.max(theoretical[1]), np.max(theoretical[2]))
 
     batch_Rs = np.tile(R.from_rotvec(np.pi/8 * np.array([0, 1, 0])).as_matrix()[None, None, ...], [BATCH_SIZE, IMAGE_NUM, 1, 1])
     theoretical, numerical = tf.test.compute_gradient(test_check, [batch_ref_image, batch_src_images, batch_ref_depth, batch_offsets, batch_Rs, batch_Ts])

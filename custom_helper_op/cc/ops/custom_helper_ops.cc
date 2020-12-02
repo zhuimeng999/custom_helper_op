@@ -249,8 +249,7 @@ REGISTER_OP("CostVolumeGrad")
 REGISTER_OP("CostVolumeV2")
     .Input("ref_image: dtype")
     .Input("src_images: dtype")
-    .Input("base_plane: dtype")
-    .Input("offsets: dtype")
+    .Input("depth_grid: dtype")
     .Input("rs: dtype")
     .Input("ts: dtype")
     .Attr("dtype: {float32,float64}")
@@ -266,13 +265,13 @@ REGISTER_OP("CostVolumeV2")
       TF_RETURN_IF_ERROR(c->GetAttr("groups", &groups));
       ShapeHandle ref_image_shape;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 4, &ref_image_shape));
-      ShapeHandle offsets_shape;
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 2, &offsets_shape));
+      ShapeHandle depth_grid_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 4, &depth_grid_shape));
       auto batch_dim = c->Dim(ref_image_shape, 0);
       auto height    = c->Dim(ref_image_shape, 1);
       auto width     = c->Dim(ref_image_shape, 2);
       auto channels  = c->Dim(ref_image_shape, 3);
-      auto depth_dim = c->Dim(offsets_shape, 1);
+      auto depth_dim = c->Dim(depth_grid_shape, 3);
       // auto channels_value = c->Value(channels);
       c->set_output(0, c->MakeShape({batch_dim, height, width, depth_dim, groups}));
       if(reduce_method == "MEAN"){
@@ -288,8 +287,7 @@ REGISTER_OP("CostVolumeV2")
 REGISTER_OP("CostVolumeGradV2")
     .Input("ref_image: dtype")
     .Input("src_images: dtype")
-    .Input("base_plane: dtype")
-    .Input("offsets: dtype")
+    .Input("depth_grid: dtype")
     .Input("rs: dtype")
     .Input("ts: dtype")
     .Input("cost_grad: dtype")

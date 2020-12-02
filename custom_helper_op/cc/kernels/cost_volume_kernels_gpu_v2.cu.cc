@@ -43,8 +43,7 @@ __global__ void CostMeanVolumeV2Kernel(const INDEX_TYPE virtual_thread,
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               T* cost_data,
@@ -53,7 +52,7 @@ __global__ void CostMeanVolumeV2Kernel(const INDEX_TYPE virtual_thread,
   int sub_channels = image_channels/groups;
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
     const auto batch_step = i/image_depth;
-    const auto d = i%image_depth;
+    // const auto d = i%image_depth;
 
     const auto tmp = batch_step/image_width;
     const auto w = batch_step%image_width;
@@ -62,7 +61,6 @@ __global__ void CostMeanVolumeV2Kernel(const INDEX_TYPE virtual_thread,
 
     const T * ref_channels = &ref_image_data[batch_step * image_channels];
 
-    const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
     T ref_w = static_cast<T>(w);
     T ref_h = static_cast<T>(h);
     if(half_centor){
@@ -82,15 +80,15 @@ __global__ void CostMeanVolumeV2Kernel(const INDEX_TYPE virtual_thread,
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
       T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
-      T src_z = src_z_coef * depth + t[2];
+      T src_z = src_z_coef * depth_grid_data[i] + t[2];
       if(src_z <= 0.0f){
         continue;
       }
       T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
-      T src_w_3d = src_w_coef * depth + t[0];
+      T src_w_3d = src_w_coef * depth_grid_data[i] + t[0];
       T src_w = src_w_3d/src_z;
       T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
-      T src_h_3d = src_h_coef * depth + t[1];
+      T src_h_3d = src_h_coef * depth_grid_data[i] + t[1];
       T src_h = src_h_3d/src_z;
       if(half_centor){
         src_w = src_w - 0.5;
@@ -149,8 +147,7 @@ __global__ void CostMinVolumeV2Kernel(const INDEX_TYPE virtual_thread,
               const int groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               T* cost_data,
@@ -169,7 +166,6 @@ __global__ void CostMinVolumeV2Kernel(const INDEX_TYPE virtual_thread,
 
     const T * ref_channels = &ref_image_data[batch_step * image_channels];
 
-    const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
     T ref_w = static_cast<T>(w);
     T ref_h = static_cast<T>(h);
     if(half_centor){
@@ -189,15 +185,15 @@ __global__ void CostMinVolumeV2Kernel(const INDEX_TYPE virtual_thread,
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
       T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
-      T src_z = src_z_coef * depth + t[2];
+      T src_z = src_z_coef * depth_grid_data[i] + t[2];
       if(src_z <= 0.0f){
         continue;
       }
       T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
-      T src_w_3d = src_w_coef * depth + t[0];
+      T src_w_3d = src_w_coef * depth_grid_data[i] + t[0];
       T src_w = src_w_3d/src_z;
       T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
-      T src_h_3d = src_h_coef * depth + t[1];
+      T src_h_3d = src_h_coef * depth_grid_data[i] + t[1];
       T src_h = src_h_3d/src_z;
       if(half_centor){
         src_w = src_w - 0.5;
@@ -292,8 +288,7 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
                                   groups,\
                                   ref_image_data, \
                                   src_images_data, \
-                                  base_plane_data, \
-                                  offsets_data, \
+                                  depth_grid_data, \
                                   Rs_data, \
                                   Ts_data
 
@@ -312,8 +307,7 @@ void CostVolumeV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
               const int groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               T* mapped_feature_data,
@@ -365,21 +359,21 @@ __global__ void CostMeanVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               const T* cost_grad_data,
               const int32* cost_mask_data,
               T* ref_image_grad_data,
               T* src_images_grad_data, 
-              T* base_plane_grad_data
+              T* depth_grid_grad_data
               ){
   const auto src_image_height_step = src_image_width * image_channels;
   const int sub_channels = image_channels/groups;
 
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
     if(cost_mask_data[i] <= 0){
+      depth_grid_grad_data[i] = T(0);
       continue;
     }
     const auto batch_step = i/image_depth;
@@ -393,7 +387,6 @@ __global__ void CostMeanVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
     const T * ref_channels = &ref_image_data[batch_step * image_channels];
     T * ref_out_channels = &ref_image_grad_data[batch_step * image_channels];
 
-    const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
     T ref_w = static_cast<T>(w);
     T ref_h = static_cast<T>(h);
     if(half_centor){
@@ -409,15 +402,15 @@ __global__ void CostMeanVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
       T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
-      T src_z = src_z_coef * depth + t[2];
+      T src_z = src_z_coef * depth_grid_data[i] + t[2];
       if(src_z <= 0.0f){
         continue;
       }
       T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
-      T src_w_3d = src_w_coef * depth + t[0];
+      T src_w_3d = src_w_coef * depth_grid_data[i] + t[0];
       T src_w = src_w_3d/src_z;
       T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
-      T src_h_3d = src_h_coef * depth + t[1];
+      T src_h_3d = src_h_coef * depth_grid_data[i] + t[1];
       T src_h = src_h_3d/src_z;
       if(half_centor){
         src_w = src_w - 0.5;
@@ -481,7 +474,7 @@ __global__ void CostMeanVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
         depth_grad += ((src_h_coef*src_z - src_z_coef*src_h_3d)*h_grad + (src_w_coef*src_z - src_z_coef*src_w_3d)*w_grad)/(src_z * src_z);
       }
     }
-    GpuAtomicAdd(&base_plane_grad_data[batch_step], depth_grad);
+    depth_grid_grad_data[i] = depth_grad;
   }
 }
 
@@ -498,15 +491,14 @@ __global__ void CostMinVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               const T* cost_grad_data,
               const int32* cost_mask_data,
               T* ref_image_grad_data,
               T* src_images_grad_data, 
-              T* base_plane_grad_data
+              T* depth_grid_grad_data
               ){
   const auto src_image_height_step = src_image_width * image_channels;
   const int sub_channels = image_channels/groups;
@@ -514,6 +506,7 @@ __global__ void CostMinVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(virtual_thread)){
     const auto cost_mask_channel_ptr = &cost_mask_data[i*groups];
     if(cost_mask_channel_ptr[0] < 0){
+      depth_grid_grad_data[i] = T(0);
       continue;
     }
 
@@ -528,7 +521,6 @@ __global__ void CostMinVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
     const T * ref_channels = &ref_image_data[batch_step * image_channels];
     T * ref_out_channels = &ref_image_grad_data[batch_step * image_channels];
 
-    const T depth = base_plane_data[batch_step] + offsets_data[b*image_depth + d];
     T ref_w = static_cast<T>(w);
     T ref_h = static_cast<T>(h);
     if(half_centor){
@@ -544,15 +536,15 @@ __global__ void CostMinVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
       const T *t = &Ts_data[(b*src_image_num + n)*3];
 
       T src_z_coef = R[6] * ref_w + R[7] * ref_h + R[8];
-      T src_z = src_z_coef * depth + t[2];
+      T src_z = src_z_coef * depth_grid_data[i] + t[2];
       if(src_z <= 0.0f){
         continue;
       }
       T src_w_coef = R[0] * ref_w + R[1] * ref_h + R[2];
-      T src_w_3d = src_w_coef * depth + t[0];
+      T src_w_3d = src_w_coef * depth_grid_data[i] + t[0];
       T src_w = src_w_3d/src_z;
       T src_h_coef = R[3] * ref_w + R[4] * ref_h + R[5];
-      T src_h_3d = src_h_coef * depth + t[1];
+      T src_h_3d = src_h_coef * depth_grid_data[i] + t[1];
       T src_h = src_h_3d/src_z;
       if(half_centor){
         src_w = src_w - 0.5;
@@ -604,11 +596,11 @@ __global__ void CostMinVolumeGradV2Kernel(const INDEX_TYPE virtual_thread,
         depth_grad += ((src_h_coef*src_z - src_z_coef*src_h_3d)*h_grad + (src_w_coef*src_z - src_z_coef*src_w_3d)*w_grad)/(src_z * src_z);
       }
     }
-    GpuAtomicAdd(&base_plane_grad_data[batch_step], depth_grad);
+    depth_grid_grad_data[i] = depth_grad;
   }
 }
 
-#define COST_GRAG_ARG_LIST COST_ARG_LIST, mapped_feature_grad_data, mapped_mask_data, ref_image_grad_data, src_images_grad_data, base_plane_grad_data
+#define COST_GRAG_ARG_LIST COST_ARG_LIST, mapped_feature_grad_data, mapped_mask_data, ref_image_grad_data, src_images_grad_data, depth_grid_grad_data
 // Zeroes count elements starting at ptr using all threads of a 1-D grid.
 // Note: this function does not synchronize, and therefore the memory range is
 // not guaranteed to be zero until the next kernel launch.
@@ -633,15 +625,14 @@ void CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               const T* mapped_feature_grad_data,
               const int32* mapped_mask_data,
               T* ref_image_grad_data,
               T* src_images_grad_data, 
-              T* base_plane_grad_data
+              T* depth_grid_grad_data
                                 ) {
     const auto base_plane_size = batch_size * image_height *image_width;
     const auto loop_count = batch_size * image_height * image_width * image_depth;
@@ -654,8 +645,8 @@ void CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
       SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_ref_size, ref_image_grad_data);
       config = GetGpuLaunchConfigBig(input_src_size, dev, SetZeroBig<T, int64>, 0, 0);
       SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_src_size, src_images_grad_data);
-      config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int64>, 0, 0);
-      SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
+      // config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int64>, 0, 0);
+      // SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
       if(reduce_method == COST_REDUCE_MEAN){
         config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeGradV2Kernel<T, int64, half_centor>, 0, 0);
         CostMeanVolumeGradV2Kernel<T, int64, half_centor><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(
@@ -671,8 +662,8 @@ void CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor>::operator()(
       SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_ref_size, ref_image_grad_data);
       config = GetGpuLaunchConfigBig(input_src_size, dev, SetZeroBig<T, int32>, 0, 0);
       SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(input_src_size, src_images_grad_data);
-      config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int32>, 0, 0);
-      SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
+      // config = GetGpuLaunchConfigBig(base_plane_size, dev, SetZeroBig<T, int32>, 0, 0);
+      // SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(base_plane_size, base_plane_grad_data);
 
       if(reduce_method == COST_REDUCE_MEAN){
         config = GetGpuLaunchConfigBig(loop_count, dev, CostMeanVolumeGradV2Kernel<T, int32, half_centor>, 0, 0);

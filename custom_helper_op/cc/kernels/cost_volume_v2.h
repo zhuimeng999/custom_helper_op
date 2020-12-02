@@ -48,8 +48,7 @@ struct CostVolumeV2Functor {
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               T* cost_data,
@@ -72,8 +71,7 @@ struct CostVolumeV2Functor<Eigen::GpuDevice, T, half_centor> {
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               T* cost_data,
@@ -95,15 +93,14 @@ struct CostVolumeGradV2Functor {
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               const T* cost_data,
               const int32* cost_mask_data,
               T* ref_image_grad_data,
               T* src_images_grad_data, 
-              T* base_plane_grad_data
+              T* depth_grid_grad_data
                                 );
 };
 
@@ -123,15 +120,14 @@ struct CostVolumeGradV2Functor<Eigen::GpuDevice, T, half_centor> {
               const int32 groups,
               const T* ref_image_data,
               const T* src_images_data, 
-              const T* base_plane_data,
-              const T* offsets_data,
+              const T* depth_grid_data,
               const T* Rs_data,
               const T* Ts_data,
               const T* cost_data,
               const int32* cost_mask_data,
               T* ref_image_grad_data,
               T* src_images_grad_data, 
-              T* base_plane_grad_data
+              T* depth_grid_grad_data
                                 );
 };
 #endif

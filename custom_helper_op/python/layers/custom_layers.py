@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 import tensorflow as tf
-from custom_helper_op.python.ops.custom_helper_ops import index_initializer, cost_aggregate, sparse_conv3d, cost_volume
+from custom_helper_op.python.ops.custom_helper_ops import index_initializer, cost_aggregate, sparse_conv3d, cost_volume, cost_volume_v2
 from tensorflow_addons.image import resampler
 
 class DepthProjectLayer(tf.keras.layers.Layer):
@@ -51,29 +51,29 @@ class CostMapLayer(tf.keras.layers.Layer):
         return cost, cost_mask
 
 class CostMapLayerV2(tf.keras.layers.Layer):
-    def __init__(self, reduce_method="MIN", half_centor=True, default_type='DYNAMIC', **kwargs):
+    def __init__(self, reduce_method="MIN", half_centor=True, default_type='DYNAMIC', groups=1, **kwargs):
         super(CostMapLayerV2, self).__init__(**kwargs)
         assert reduce_method in ["MEAN", "MIN"]
 
         self.reduce_method = reduce_method
         self.half_centor = half_centor
         self.default_type = default_type
+        self.groups = groups
 
     def build(self, input_shape):
-        ref_image, *_ = input_shape
         if self.default_type == 'DYNAMIC':
-            self.default_cost = self.add_weight(shape=[ref_image[-1], ], initializer="zeros", trainable=True, name='CostMapV2Default')
+            self.default_cost = self.add_weight(shape=[], initializer="zeros", trainable=True, name='CostMapDefault')
         elif self.default_type == 'CONSTANT':
-            self.default_cost = self.add_weight(shape=[ref_image[-1], ], initializer="zeros", trainable=False, name='CostMapV2Default')
+            self.default_cost = self.add_weight(shape=[], initializer="zeros", trainable=False, name='CostMapDefault')
         else:
             self.default_value = self.default_type
 
     def call(self, inputs, **kwargs):
-        cost, cost_mask = cost_volume(*inputs, reduce_method=self.reduce_method, half_centor=self.half_centor)
+        cost, cost_mask = cost_volume_v2(*inputs, reduce_method=self.reduce_method, groups=self.groups, half_centor=self.half_centor)
         if self.reduce_method == "MEAN":
-            cost = tf.where(cost_mask > 0, cost, self.default_cost[None, None, None, None, :])
+            cost = tf.where(cost_mask > 0, cost, self.default_cost)
         else:
-            cost = tf.where(cost_mask >= 0, cost, self.default_cost[None, None, None, None, :])
+            cost = tf.where(cost_mask >= 0, cost, self.default_cost)
         return cost, cost_mask
 
 class SparseConv3DLayer(tf.keras.layers.Layer):
