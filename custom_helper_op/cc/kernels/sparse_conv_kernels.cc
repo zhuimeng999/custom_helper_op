@@ -319,15 +319,18 @@ class SparseConv3DOp : public OpKernel {
                       && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
                 errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image, got ", base_plane.shape().DebugString()));
 
+    const auto out_height = (image_height + strides_[0] - 1)/strides_[0];
+    const auto out_width = (image_width + strides_[1] - 1)/strides_[1];
+    const auto out_depth = (image_depth + strides_[2] - 1)/strides_[2];
     Tensor *output;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,
-                            TensorShape({batch_size, image_height, image_width, image_depth, out_channel_num}),
+                            TensorShape({batch_size, out_height, out_width, out_depth, out_channel_num}),
                             &output));
 
 
     #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d) \
-      SparseConv3DFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d>()(ctx->eigen_device<Device>(), \
+      SparseConv3DFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
                     strides_[0], \
                     strides_[1],\
                     strides_[2],\
@@ -365,7 +368,7 @@ typedef Eigen::GpuDevice GPUDevice;
                               .TypeConstraint<TYPE>("dtype"),        \
                           SparseConv3DOp<GPUDevice, TYPE>)
 
-TF_CALL_float(REGISTER);
+// TF_CALL_float(REGISTER);
 TF_CALL_double(REGISTER);
 #undef REGISTER
 
@@ -442,7 +445,7 @@ class SparseConv3DGradOp : public OpKernel {
 
 
     #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d) \
-      SparseConv3DGradFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d>()(ctx->eigen_device<Device>(), \
+      SparseConv3DGradFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
                     strides_[0], \
                     strides_[1],\
                     strides_[2],\
@@ -484,8 +487,8 @@ typedef Eigen::GpuDevice GPUDevice;
                               .TypeConstraint<TYPE>("dtype"),        \
                           SparseConv3DGradOp<GPUDevice, TYPE>)
 
-TF_CALL_float(REGISTER);
-// TF_CALL_double(REGISTER);
+// TF_CALL_float(REGISTER);
+TF_CALL_double(REGISTER);
 #undef REGISTER
 
 #endif  // GOOGLE_CUDA

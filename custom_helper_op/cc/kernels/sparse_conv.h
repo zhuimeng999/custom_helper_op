@@ -76,11 +76,13 @@ void operator()(const Eigen::GpuDevice& d,
 
 #define SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST \
         int kKnownFilterHeight, int kKnownFilterWidth, int kKnownFilterDepth, \
-        int kKnownDilationHeight, int kKnownDilationWidth, int kKnownDilationDepth
+        int kKnownDilationHeight, int kKnownDilationWidth, int kKnownDilationDepth, \
+        int kKnownStrideHeight, int kKnownStrideWidth, int kKnownStrideDepth
 
 #define SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST \
         kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
-        kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth
+        kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth, \
+        kKnownStrideHeight, kKnownStrideWidth, kKnownStrideDepth
 
 #define SPARSE_CONV3D_BASE_ARG_DEF_LIST \
               const int stride_h, \

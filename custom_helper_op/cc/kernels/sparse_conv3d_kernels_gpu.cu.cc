@@ -13,9 +13,9 @@ namespace custom_helper_op {
 namespace functor {
 
 #define SPARSE_CONV3D_KERNEL_BASE_ARG_DEF_LIST \
-              const int stride_h, \
-              const int stride_w, \
-              const int stride_d, \
+              const int stride_h_arg, \
+              const int stride_w_arg, \
+              const int stride_d_arg, \
               const int dilations_h_arg, \
               const int dilations_w_arg, \
               const int dilations_d_arg, \
@@ -73,6 +73,9 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
   const int dilations_h = kKnownDilationHeight < 0 ? dilations_h_arg: kKnownDilationHeight;
   const int dilations_w = kKnownDilationWidth < 0 ? dilations_w_arg: kKnownDilationWidth;
   const int dilations_d = kKnownDilationDepth < 0 ? dilations_d_arg: kKnownDilationDepth;
+  const int stride_h = kKnownStrideHeight < 0 ? stride_h_arg: kKnownStrideHeight;
+  const int stride_w = kKnownStrideWidth < 0 ? stride_w_arg: kKnownStrideWidth;
+  const int stride_d = kKnownStrideDepth < 0 ? stride_d_arg: kKnownStrideDepth;
 
   const INDEX_TYPE image_width_step = image_depth*image_channels;
   const INDEX_TYPE image_height_step = image_width*image_width_step;
@@ -185,7 +188,7 @@ void SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LI
 
 
 #define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d) \
-                template struct SparseConv3DFunctor<GPUDevice, instance_type, f_h, f_w, f_d, d_h, d_w, d_d>;
+                template struct SparseConv3DFunctor<GPUDevice, instance_type, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
 
 
 #define SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, d_h, d_w, d_d) \
@@ -197,7 +200,7 @@ void SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LI
                       SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 1, 1, 1) \
                       SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 2, 2, 2)
 
-SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
+// SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
 SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double); 
 
 #undef SPARSE_CONV3D_DEFINE_INSTANCE
@@ -217,6 +220,9 @@ __global__ void SparseConv3DGradKernel(const int32 count,
   const int dilations_h = kKnownDilationHeight < 0 ? dilations_h_arg: kKnownDilationHeight;
   const int dilations_w = kKnownDilationWidth < 0 ? dilations_w_arg: kKnownDilationWidth;
   const int dilations_d = kKnownDilationDepth < 0 ? dilations_d_arg: kKnownDilationDepth;
+  const int stride_h = kKnownStrideHeight < 0 ? stride_h_arg: kKnownStrideHeight;
+  const int stride_w = kKnownStrideWidth < 0 ? stride_w_arg: kKnownStrideWidth;
+  const int stride_d = kKnownStrideDepth < 0 ? stride_d_arg: kKnownStrideDepth;
 
   const INDEX_TYPE image_width_step = image_depth*image_channels;
   const INDEX_TYPE image_height_step = image_width*image_width_step;
@@ -398,7 +404,7 @@ void SparseConv3DGradFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_AR
               T * filter_grad_data,
               T * default_channel_value_grad)
 {
-  const auto loop_count = static_cast<int64>(batch_size)*image_height*image_width*image_depth;
+  const auto loop_count = static_cast<int64>(batch_size)*((image_height + stride_h - 1)/stride_h)*image_width*image_depth;
   const auto images_size = static_cast<int64>(batch_size)*image_height*image_width*image_depth*image_channels;
   const auto out_size = static_cast<int64>(batch_size)*image_height*image_width*image_depth*out_channel_num;
   const auto filter_size= filter_h*filter_w*filter_d*image_channels*out_channel_num;
@@ -427,11 +433,11 @@ void SparseConv3DGradFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_AR
 
 
 #define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d) \
-                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, f_h, f_w, f_d, d_h, d_w, d_d>;
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
 
 
-SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
-// SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double); 
+// SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
+SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double); 
 
 #undef SPARSE_CONV3D_DEFINE_INSTANCE
 
