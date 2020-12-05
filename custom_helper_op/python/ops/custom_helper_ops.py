@@ -217,6 +217,23 @@ def _sparse_conv2d_grad(op, out_grad):
 
 tf.no_gradient("SparseConv2DGrad")
 
+@tf.function
+def sparse_pad(images, base_plane, strides=(1, 1, 1), dilations=(1, 1, 1), name=None):
+    with tf.name_scope(name or "sparse_pad"):
+        return _custom_helper_ops.sparse_pad(images=images, base_plane=base_plane, strides=strides, dilations=dilations)
+
+
+@tf.RegisterGradient("SparsePad")
+def _sparse_pad_grad(op, out_grad):
+    images, base_plane = op.inputs
+    images_grad = _custom_helper_ops.sparse_pad_grad(images=images, base_plane=base_plane, out_grad=out_grad,
+                                                                                          strides=op.get_attr("strides"),
+                                                                                          dilations=op.get_attr("dilations")
+                                                                                          )
+
+    return [images_grad, None]
+
+tf.no_gradient("SparsePadGrad")
 
 @tf.function
 def sparse_conv3d(images, filters, default_value, base_plane, strides=(1, 1, 1), dilations=(1, 1, 1), dynamic_default=False, name=None):

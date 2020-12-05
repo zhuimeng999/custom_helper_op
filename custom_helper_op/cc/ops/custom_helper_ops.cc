@@ -494,6 +494,45 @@ REGISTER_OP("SparseConv2DGrad")
       return Status::OK();
     });
 
+// V2 op supports output_shape.
+REGISTER_OP("SparsePad")
+    .Input("images: dtype")
+    .Input("base_plane: int32")
+    .Output("output: dtype")
+    .Attr("dtype: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int)")
+    .SetShapeFn([](InferenceContext *c) {
+      std::vector<int32> strides;
+      TF_RETURN_IF_ERROR(c->GetAttr("strides", &strides));
+      ShapeHandle image_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &image_shape));
+      auto batch_dim       = c->Dim(image_shape, 0);
+      auto image_height    = c->Value(c->Dim(image_shape, 1));
+      auto image_width     = c->Value(c->Dim(image_shape, 2));
+      auto image_depth     = c->Value(c->Dim(image_shape, 3));
+      auto image_channel   = c->Value(c->Dim(image_shape, 4));
+
+      const auto out_height = image_height * strides[0];
+      const auto out_width = image_width * strides[1];
+      const auto out_depth = image_depth * strides[2];
+      c->set_output(0, c->MakeShape({batch_dim, out_height, out_width, out_depth, image_channel}));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
+REGISTER_OP("SparsePadGrad")
+    .Input("images: dtype")
+    .Input("base_plane: int32")
+    .Input("out_grad: dtype")
+    .Output("images_grad: dtype")
+    .Attr("dtype: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int)")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      return Status::OK();
+    });
 
 // V2 op supports output_shape.
 REGISTER_OP("SparseConv3D")
