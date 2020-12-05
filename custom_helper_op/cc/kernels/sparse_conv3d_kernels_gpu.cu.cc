@@ -202,18 +202,23 @@ void SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LI
 };
 
 
-#define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d) \
-                template struct SparseConv3DFunctor<GPUDevice, instance_type, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
-
-
-#define SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, d_h, d_w, d_d) \
-                SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, -1, -1, -1, d_h, d_w, d_d) \
-                SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, 3, 3, 3, d_h, d_w, d_d)
-
 #define SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(instance_type) \
-                      SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, -1, -1, -1)\
-                      SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 1, 1, 1) \
-                      SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 2, 2, 2)
+                template struct SparseConv3DFunctor<GPUDevice, instance_type, 3, 3, 3, 1, 1, 1, 1, 1, 1>; \
+                template struct SparseConv3DFunctor<GPUDevice, instance_type, 3, 3, 3, 1, 1, 1, 2, 2, 2>; \
+                template struct SparseConv3DFunctor<GPUDevice, instance_type, -1, -1, -1, -1, -1, -1, -1, -1, -1>;
+
+// #define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d) \
+//                 template struct SparseConv3DFunctor<GPUDevice, instance_type, f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d>;
+
+
+// #define SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, d_h, d_w, d_d) \
+//                 SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, -1, -1, -1, d_h, d_w, d_d) \
+//                 SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, 3, 3, 3, d_h, d_w, d_d)
+
+// #define SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(instance_type) \
+//                       SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, -1, -1, -1)\
+//                       SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 1, 1, 1) \
+//                       SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 2, 2, 2)
 
 SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
 // SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double); 
@@ -471,11 +476,20 @@ void SparseConv3DGradFunctor<Eigen::GpuDevice, T, dynamic_default, SPARSE_CONV3D
 }
 
 
-#define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d) \
-                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>; \
-                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
+#define SPARSE_CONV3D_GRAD_DEFINE_INSTANCE_WITH_TYPE(instance_type) \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, 3, 3, 3, 1, 1, 1, 1, 1, 1>; \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, 3, 3, 3, 1, 1, 1, 2, 2, 2>; \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, -1, -1, -1, -1, -1, -1, -1, -1, -1>;\
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, 3, 3, 3, 1, 1, 1, 1, 1, 1>; \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, 3, 3, 3, 1, 1, 1, 2, 2, 2>; \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, -1, -1, -1, -1, -1, -1, -1, -1, -1>;
 
-SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
+SPARSE_CONV3D_GRAD_DEFINE_INSTANCE_WITH_TYPE(float);
+// #define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d) \
+//                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>; \
+//                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
+
+// SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
 // SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double); 
 
 #undef SPARSE_CONV3D_DEFINE_INSTANCE

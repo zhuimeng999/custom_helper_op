@@ -250,23 +250,19 @@ using functor::SparseConv3DFunctor;
 
 #define SPARSE_CONV3D_KERNEL_CALL() \
     if((dilations_[0] == 1) && (dilations_[1] == 1) && (dilations_[2] == 1)){ \
-      if((filter_h == 3) && (filter_w == 3) && (filter_h == 3)){ \
-        FIXED_FILTER_SIZE_CASE(3, 3, 3, 1, 1, 1); \
+      if((filter_h == 3) && (filter_w == 3) && (filter_d == 3)){ \
+        if((strides_[0] == 1) && (strides_[1] == 1) && (strides_[2] == 1)){\
+          FIXED_FILTER_SIZE_CASE(3, 3, 3, 1, 1, 1, 1, 1, 1);\
+        } else if((strides_[0] == 2) && (strides_[1] == 2) && (strides_[2] == 2)){\
+          FIXED_FILTER_SIZE_CASE(3, 3, 3, 1, 1, 1, 2, 2, 2);\
+        } else {\
+          FIXED_FILTER_SIZE_CASE(-1, -1, -1, -1, -1, -1, -1, -1, -1);\
+        }\
       } else { \
-        FIXED_FILTER_SIZE_CASE(-1, -1, -1, 1, 1, 1);\
-      }\
-    } else if((dilations_[0] == 2) && (dilations_[1] == 2) && (dilations_[2] == 2)){\
-      if((filter_h == 3) && (filter_w == 3) && (filter_h == 3)){\
-        FIXED_FILTER_SIZE_CASE(3, 3, 3, 2, 2, 2);\
-      } else {\
-        FIXED_FILTER_SIZE_CASE(-1, -1, -1, 2, 2, 2);\
+        FIXED_FILTER_SIZE_CASE(-1, -1, -1, -1, -1, -1, -1, -1, -1);\
       }\
     } else {\
-      if((filter_h == 3) && (filter_w == 3) && (filter_h == 3)){\
-        FIXED_FILTER_SIZE_CASE(3, 3, 3, -1, -1, -1);\
-      } else {\
-        FIXED_FILTER_SIZE_CASE(-1, -1, -1, -1, -1, -1);\
-      }\
+      FIXED_FILTER_SIZE_CASE(-1, -1, -1, -1, -1, -1, -1, -1, -1);\
     }
 
 
@@ -326,8 +322,8 @@ class SparseConv3DOp : public OpKernel {
                             &output));
 
 
-    #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d) \
-      SparseConv3DFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
+    #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d) \
+      SparseConv3DFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d>()(ctx->eigen_device<Device>(), \
                     SPARSE_CONV3D_FUNCTOR_BASE_ARG_LIST, \
                     output->tensor<T, 5>().data());
     SPARSE_CONV3D_KERNEL_CALL();
@@ -426,16 +422,16 @@ class SparseConv3DGradOp : public OpKernel {
                               default_channels_value.shape(),
                               &default_channels_value_grad));
 
-    #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d) \
+    #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d) \
       if(dynamic_default_){\
-        SparseConv3DGradFunctor<Device, T, true, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
+        SparseConv3DGradFunctor<Device, T, true, f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d>()(ctx->eigen_device<Device>(), \
                       SPARSE_CONV3D_FUNCTOR_BASE_ARG_LIST,\
                       out_grad.tensor<T, 5>().data(),\
                       images_grad->tensor<T, 5>().data(),\
                       filter_grad->tensor<T, 5>().data(),\
                       default_channels_value_grad->flat<T>().data());\
       } else {\
-        SparseConv3DGradFunctor<Device, T, false, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
+        SparseConv3DGradFunctor<Device, T, false, f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d>()(ctx->eigen_device<Device>(), \
                       SPARSE_CONV3D_FUNCTOR_BASE_ARG_LIST,\
                       out_grad.tensor<T, 5>().data(),\
                       images_grad->tensor<T, 5>().data(),\
