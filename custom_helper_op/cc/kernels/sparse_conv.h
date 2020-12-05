@@ -99,6 +99,9 @@ void operator()(const Eigen::GpuDevice& d,
               const int image_width, \
               const int image_depth, \
               const int image_channels, \
+              const int out_height, \
+              const int out_width, \
+              const int out_depth, \
               const int out_channel_num, \
               const T* images_data, \
               const T* filter_data, \
@@ -124,7 +127,7 @@ void operator()(const Eigen::GpuDevice& d,
 };
 #endif
 
-template <typename Device, typename T, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
+template <typename Device, typename T, bool dynamic_default, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
 struct SparseConv3DGradFunctor {
 // Computes on device "d": out = out.constant(in(0)),
 void operator()(const Device& d, 
@@ -137,10 +140,10 @@ void operator()(const Device& d,
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
-struct SparseConv3DGradFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST> {
+template <typename T, bool dynamic_default, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
+struct SparseConv3DGradFunctor<Eigen::GpuDevice, T, dynamic_default, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST> {
 // Computes on device "d": out = out.constant(in(0)),
-void operator()(const Eigen::GpuDevice& d, 
+void operator()(const Eigen::GpuDevice& d,
               SPARSE_CONV3D_BASE_ARG_DEF_LIST,
               const T * out_grad_data,
               T * images_grad_data,

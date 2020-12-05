@@ -505,17 +505,24 @@ REGISTER_OP("SparseConv3D")
     .Attr("dtype: {float, double}")
     .Attr("strides: list(int)")
     .Attr("dilations: list(int)")
+    .Attr("dynamic_default: bool")
     .SetShapeFn([](InferenceContext *c) {
+      std::vector<int32> strides;
+      TF_RETURN_IF_ERROR(c->GetAttr("strides", &strides));
       ShapeHandle image_shape;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &image_shape));
       ShapeHandle filter_shape;
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 5, &filter_shape));
       auto batch_dim = c->Dim(image_shape, 0);
-      auto height    = c->Dim(image_shape, 1);
-      auto width     = c->Dim(image_shape, 2);
-      auto depth     = c->Dim(image_shape, 3);
-      auto out_channel_num = c->Dim(filter_shape, 4);
-      c->set_output(0, c->MakeShape({batch_dim, height, width, depth, out_channel_num}));
+      auto image_height    = c->Value(c->Dim(image_shape, 1));
+      auto image_width     = c->Value(c->Dim(image_shape, 2));
+      auto image_depth     = c->Value(c->Dim(image_shape, 3));
+      auto out_channel_num = c->Value(c->Dim(filter_shape, 4));
+
+      const auto out_height = (image_height + strides[0] - 1)/strides[0];
+      const auto out_width = (image_width + strides[1] - 1)/strides[1];
+      const auto out_depth = (image_depth + strides[2] - 1)/strides[2];
+      c->set_output(0, c->MakeShape({batch_dim, out_height, out_width, out_depth, out_channel_num}));
       return Status::OK();
     });
 
@@ -532,6 +539,7 @@ REGISTER_OP("SparseConv3DGrad")
     .Attr("dtype: {float, double}")
     .Attr("strides: list(int)")
     .Attr("dilations: list(int)")
+    .Attr("dynamic_default: bool")
     .SetShapeFn([](InferenceContext* c) {
       c->set_output(0, c->input(0));
       c->set_output(1, c->input(1));

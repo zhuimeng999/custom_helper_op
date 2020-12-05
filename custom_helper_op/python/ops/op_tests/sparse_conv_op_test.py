@@ -97,13 +97,15 @@ import time
 
 class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     @parameterized.parameters(
-      (1, 128, 160, 32, 64, 4, 3, (3, 3, 3), (1, 1, 1)),
-      (2, 128, 160, 32, 96, 30, 20, (5, 3, 3), (2, 2, 2)),
+      (1, 128, 160, 16, 32, 4, 3, (3, 3, 3), (1, 1, 1)),
+      (2, 128, 160, 16, 48, 5, 6, (5, 3, 3), (1, 1, 1)),
+      (2, 128, 160, 16, 48, 5, 6, (3, 3, 3), (2, 2, 2)),
     )
     def testForward(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
         images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
         filters = tf.random.uniform([KERNEL_SIZE[0], KERNEL_SIZE[1], KERNEL_SIZE[2], IN_CHANNELS, OUT_CHANNELS], dtype=tf.float64)
         base_plane = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], minval=0, maxval=(VIRTUAL_DEPTH - IMAGE_DEPTH), dtype=tf.int32)
+        # base_plane = (base_plane//2)*2
         # test_start_d = 5
         # base_plane = tf.ones([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], dtype=tf.int32) * test_start_d
         default_value = tf.random.uniform([], dtype=images_all.dtype)
@@ -120,13 +122,15 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
         images_nn = tf.pad(images_all, [[0, 0], [pad_size[0], pad_size[0]], [pad_size[1], pad_size[1]], [pad_size[2], pad_size[2]], [0, 0]],
                                                         mode="CONSTANT", constant_values=default_value)
         start = time.time()
-        res = sparse_conv3d(images, filters, default_value, base_plane, dilations=DILATIONS_SIZE)
+        res = sparse_conv3d(images, filters, default_value, base_plane, dilations=DILATIONS_SIZE, strides=(1, 1, 1))
         my_time = time.time() - start
 
         # filters_nn = tf.transpose(filters, [1, 2, 3, 4, 0])
         start = time.time()
         res_nn = tf.nn.conv3d(images_nn, filters, strides=(1, 1, 1, 1, 1), padding="VALID", dilations=(1, *DILATIONS_SIZE, 1))
         nn_time = time.time() - start
+        gather_indice = (base_plane[:, ::1, ::1, :] + 0)//1 + np.arange(0, IMAGE_DEPTH//1, dtype=np.int32)[None, None, None, :]
+        print(tf.shape(res_nn), tf.shape(res))
         res_nn = tf.gather_nd(res_nn, gather_indice[..., None], batch_dims=3)
         print("my ", my_time/1000, " nn ", nn_time/1000)
         # test_out = tf.reduce_sum(images[:, None, :KERNEL_SIZE[0], :KERNEL_SIZE[1], :KERNEL_SIZE[2], :]*filters[None, ...], axis=(2, 3, 4, 5))
@@ -211,7 +215,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
 
         @tf.function
         def test_check(*args):
-            cost = sparse_conv3d(*args, base_plane, dilations=DILATIONS_SIZE)
+            cost = sparse_conv3d(*args, base_plane, dilations=DILATIONS_SIZE, dynamic_default=True)
             return tf.reduce_mean(cost)
         with self.cached_session():
             # res = sparse_conv2d(images, filters, base_plane, default_value, offsets)

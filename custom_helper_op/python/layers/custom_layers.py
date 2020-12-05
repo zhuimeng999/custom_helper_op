@@ -99,7 +99,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
         images, _ = input_shape
         self.kernel = self.add_weight(shape=(*self.kernel_size, images[-1], self.filters),
                              initializer='glorot_uniform',
-                             trainable=False,
+                             trainable=True,
                              dtype=self.dtype,
                              name='sparse3d_kernal')
         if self.use_bias:
@@ -109,6 +109,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
                 initializer='zeros',
                 dtype=self.dtype,
                 trainable=True)
+                
         if self.default_type == 'CONSTANT':
             self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=False, dtype=self.dtype, name='sparse_conv3d_default')
         elif self.default_type == 'DYNAMIC':
@@ -118,7 +119,14 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
 
     def call(self, inputs, **kwargs):
         images, base_plane = inputs
-        out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations)
+        if self.default_type == 'CONSTANT':
+            dynamic_default = False
+        elif self.default_type == 'DYNAMIC':
+            dynamic_default = True
+        else:
+            dynamic_default = self.default_value.trainable
+            
+        out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
         if self.use_bias:
             out =  tf.nn.bias_add(out, self.bias)
         return out

@@ -27,6 +27,9 @@ namespace functor {
               const int image_width, \
               const int image_depth, \
               const int image_channels, \
+              const int out_height, \
+              const int out_width, \
+              const int out_depth, \
               const int out_channel_num, \
               const T* images_data, \
               const T* filter_data, \
@@ -49,6 +52,9 @@ namespace functor {
               image_width, \
               image_depth, \
               image_channels, \
+              out_height, \
+              out_width, \
+              out_depth, \
               out_channel_num, \
               images_data, \
               filter_data, \
@@ -84,14 +90,23 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
   const auto filter_width_step = filter_d*filter_depth_step;
   const auto filter_height_step = filter_w*filter_width_step;
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(count)) {
-    const int32 d = i%image_depth;
-    const INDEX_TYPE depth_map_pos = i/image_depth;
+    int32 d = i%out_depth;
+    INDEX_TYPE depth_map_pos = i/out_depth;
  
-    const int32 w = depth_map_pos%image_width;
-    const int32 tmp = depth_map_pos/image_width;
+    int32 w = depth_map_pos%out_width;
+    const int32 tmp = depth_map_pos/out_width;
 
-    const int32 h = tmp%image_height;
-    const int32 b = tmp/image_height;
+    int32 h = tmp%out_height;
+    const int32 b = tmp/out_height;
+    d = d*stride_d;
+    w = w*stride_w;
+    h = h*stride_h;
+
+    if((kKnownStrideHeight != 1) || (kKnownStrideWidth != 1)){
+      depth_map_pos = (b*image_height+h)*image_width+w;
+    }
+
+    d = d + ((base_plane_data[depth_map_pos] + stride_d - 1)/stride_d)*stride_d - base_plane_data[depth_map_pos];
 
     const auto image_start_h = h - (filter_h/2)*dilations_h;
     const auto image_start_w = w - (filter_w/2)*dilations_w;
@@ -173,9 +188,9 @@ void SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LI
               SPARSE_CONV3D_BASE_ARG_DEF_LIST,
               T * out_data)
 {
-  const auto loop_count = static_cast<int64>(batch_size)*image_height*image_width*image_depth;
+  const auto loop_count = static_cast<int64>(batch_size)*out_height*out_width*out_depth;
   const auto images_size = static_cast<int64>(batch_size)*image_height*image_width*image_depth*image_channels;
-  const auto out_size = static_cast<int64>(batch_size)*image_height*image_width*image_depth*out_channel_num;
+  const auto out_size = static_cast<int64>(batch_size)*out_height*out_width*out_depth*out_channel_num;
   if( (images_size > INT32_MAX) | (out_size > INT32_MAX)){
     auto config = GetGpuLaunchConfig(loop_count, d, SparseConv3DKernel<T, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
     SparseConv3DKernel<T, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(SPARSE_CONV3D_KERNEL_ARG_LIST);  
@@ -205,7 +220,7 @@ SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double);
 
 #undef SPARSE_CONV3D_DEFINE_INSTANCE
 
-template <typename T, typename INDEX_TYPE, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
+template <typename T, bool dynamic_default, typename INDEX_TYPE, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
 __global__ void SparseConv3DGradKernel(const int32 count,
               SPARSE_CONV3D_KERNEL_BASE_ARG_DEF_LIST,
               const T * out_grad_data,
@@ -231,14 +246,23 @@ __global__ void SparseConv3DGradKernel(const int32 count,
   const auto filter_width_step = filter_d*filter_depth_step;
   const auto filter_height_step = filter_w*filter_width_step;
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(count)) {
-    const int32 d = i%image_depth;
-    const INDEX_TYPE depth_map_pos = i/image_depth;
+    int32 d = i%out_depth;
+    INDEX_TYPE depth_map_pos = i/out_depth;
  
-    const int32 w = depth_map_pos%image_width;
-    const int32 tmp = depth_map_pos/image_width;
+    int32 w = depth_map_pos%out_width;
+    const int32 tmp = depth_map_pos/out_width;
 
-    const int32 h = tmp%image_height;
-    const int32 b = tmp/image_height;
+    int32 h = tmp%out_height;
+    const int32 b = tmp/out_height;
+    d = d*stride_d;
+    w = w*stride_w;
+    h = h*stride_h;
+
+    if((kKnownStrideHeight != 1) || (kKnownStrideWidth != 1)){
+      depth_map_pos = (b*image_height+h)*image_width+w;
+    }
+
+    d = d + ((base_plane_data[depth_map_pos] + stride_d - 1)/stride_d)*stride_d - base_plane_data[depth_map_pos];
 
     const auto image_start_h = h - (filter_h/2)*dilations_h;
     const auto image_start_w = w - (filter_w/2)*dilations_w;
@@ -255,7 +279,10 @@ __global__ void SparseConv3DGradKernel(const int32 count,
     // }
     const auto out_grad_channel = &out_grad_data[i*out_channel_num];
 
-    T default_value_grad_tmp = T(0.);
+    T default_value_grad_tmp;
+    if(dynamic_default){
+      default_value_grad_tmp = T(0.);
+    }
 
     _Pragma("unroll")  for(int f_h = 0; f_h < filter_h; f_h++){
       const auto im_h = image_start_h + f_h*dilations_h;
@@ -289,10 +316,10 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                   T tmp = T(0);
                   for(int o_c = 0; o_c < out_channel_num; o_c++){
                     /* output channel loop */
-                    atomicAdd(&f_grad_o_ptr[o_c], im_d_ptr[f_c]*out_grad_channel[o_c]);
+                    GpuAtomicAdd(&f_grad_o_ptr[o_c], im_d_ptr[f_c]*out_grad_channel[o_c]);
                     tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
                   }
-                  atomicAdd(&im_grad_d_ptr[f_c], tmp);
+                  GpuAtomicAdd(&im_grad_d_ptr[f_c], tmp);
                 }
               } else {
                 /* 3. empty depth pixel */
@@ -301,8 +328,10 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                   const auto f_grad_o_ptr = &f_grad_d_ptr[f_pos];
                   for(int o_c = 0; o_c < out_channel_num; o_c++){
                     // out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-                    atomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
-                    default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
+                    GpuAtomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
+                    if(dynamic_default){
+                      default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
+                    }
                   }
                 }
               }
@@ -314,8 +343,10 @@ __global__ void SparseConv3DGradKernel(const int32 count,
               const auto f_grad_o_ptr = &f_grad_w_ptr[f_pos];
               for(int o_c = 0; o_c < out_channel_num; o_c++){
                 // out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-                atomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
-                default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
+                GpuAtomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
+                if(dynamic_default){
+                  default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
+                }
               }
             }
           }
@@ -327,14 +358,18 @@ __global__ void SparseConv3DGradKernel(const int32 count,
           const auto f_grad_o_ptr = &f_grad_h_ptr[f_pos];
           for(int o_c = 0; o_c < out_channel_num; o_c++){
             // out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-            atomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
-            default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
+            GpuAtomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
+            if(dynamic_default){
+              default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
+            }
           }
         }
       }
     }
-    if(default_value_grad_tmp > T(0.)){
-      atomicAdd(&default_channel_grad[0], default_value_grad_tmp);
+    if(dynamic_default){
+      if(default_value_grad_tmp > T(0.)){
+        GpuAtomicAdd(&default_channel_grad[0], default_value_grad_tmp);
+      }
     }
   }
 }
@@ -396,45 +431,49 @@ GpuLaunchConfig GetGpuLaunchConfigBig(const int64 work_element_count,
               default_channel_value_grad 
 
 
-template <typename T, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
-void SparseConv3DGradFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>::operator()(const Eigen::GpuDevice& dev, 
+template <typename T, bool dynamic_default, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
+void SparseConv3DGradFunctor<Eigen::GpuDevice, T, dynamic_default, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>::operator()(const Eigen::GpuDevice& dev, 
               SPARSE_CONV3D_BASE_ARG_DEF_LIST,
               const T * out_grad_data,
               T * images_grad_data,
               T * filter_grad_data,
               T * default_channel_value_grad)
 {
-  const auto loop_count = static_cast<int64>(batch_size)*((image_height + stride_h - 1)/stride_h)*image_width*image_depth;
+  const auto loop_count = static_cast<int64>(batch_size)*out_height*out_width*out_depth;
   const auto images_size = static_cast<int64>(batch_size)*image_height*image_width*image_depth*image_channels;
-  const auto out_size = static_cast<int64>(batch_size)*image_height*image_width*image_depth*out_channel_num;
+  const auto out_size = static_cast<int64>(batch_size)*out_height*out_width*out_depth*out_channel_num;
   const auto filter_size= filter_h*filter_w*filter_d*image_channels*out_channel_num;
   if( (images_size > INT32_MAX) | (out_size > INT32_MAX)){
     auto config = GetGpuLaunchConfigBig(images_size, dev, SetZeroBig<T, int64>, 0, 0);
     SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(images_size, images_grad_data);
     config = GetGpuLaunchConfigBig(filter_size, dev, SetZeroBig<T, int64>, 0, 0);
     SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(filter_size, filter_grad_data);
-    config = GetGpuLaunchConfigBig(1, dev, SetZeroBig<T, int64>, 0, 0);
-    SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(1, default_channel_value_grad);
+    if(dynamic_default){
+      config = GetGpuLaunchConfigBig(1, dev, SetZeroBig<T, int64>, 0, 0);
+      SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(1, default_channel_value_grad);
+    }
 
-    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
-    SparseConv3DGradKernel<T, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST);  
+    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, dynamic_default, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
+    SparseConv3DGradKernel<T, dynamic_default, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST);  
   } else {
     auto config = GetGpuLaunchConfigBig(images_size, dev, SetZeroBig<T, int32>, 0, 0);
     SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(images_size, images_grad_data);
     config = GetGpuLaunchConfigBig(filter_size, dev, SetZeroBig<T, int32>, 0, 0);
     SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(filter_size, filter_grad_data);
-    config = GetGpuLaunchConfigBig(1, dev, SetZeroBig<T, int32>, 0, 0);
-    SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(1, default_channel_value_grad);
+    if(dynamic_default){
+      config = GetGpuLaunchConfigBig(1, dev, SetZeroBig<T, int32>, 0, 0);
+      SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(1, default_channel_value_grad);
+    }
 
-    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
-    SparseConv3DGradKernel<T, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST);  
+    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, dynamic_default, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
+    SparseConv3DGradKernel<T, dynamic_default, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST);  
   }
 }
 
 
 #define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d) \
-                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
-
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>; \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
 
 // SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
 SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double); 

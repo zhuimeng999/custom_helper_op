@@ -224,35 +224,30 @@ TF_CALL_float(REGISTER);
 
 using functor::SparseConv3DFunctor;
 
-/* 
-#define SPARSE_CONV3D_BASE_FILTER_CASE(kKnownFilter_Height, kKnowFilter_Width, kKnownFilter_Depth) \
-  case kKnownFilter_Depth:\
-  FIXED_FILTER_SIZE_CASE(kKnownFilter_Height, kKnowFilter_Width, kKnownFilter_Depth)\
-  break;
+#define SPARSE_CONV3D_FUNCTOR_BASE_ARG_LIST \
+                    strides_[0],\
+                    strides_[1],\
+                    strides_[2],\
+                    dilations_[0],\
+                    dilations_[1],\
+                    dilations_[2],\
+                    filter_h,\
+                    filter_w,\
+                    filter_d,\
+                    batch_size,\
+                    image_height,\
+                    image_width,\
+                    image_depth,\
+                    image_channels,\
+                    out_height,\
+                    out_width,\
+                    out_depth,\
+                    out_channel_num,\
+                    images.tensor<T, 5>().data(),\
+                    filter.tensor<T, 5>().data(), \
+                    default_channels_value.flat<T>().data(),\
+                    base_plane.tensor<int32, 4>().data()
 
-#define DEFAULT_FILTER_CASE() \
-  default:\
-  FIXED_FILTER_SIZE_CASE(-1, -1, -1)\
-  break;
-
-#define SPARSE_CONV3D_CASE_FILTER_D(kKnownFilter_Height, kKnowFilter_Width) \
-  case kKnowFilter_Width:\
-  switch (filter_d){ \
-  SPARSE_CONV3D_BASE_FILTER_CASE(kKnownFilter_Height, kKnowFilter_Width, 1) \
-  SPARSE_CONV3D_BASE_FILTER_CASE(kKnownFilter_Height, kKnowFilter_Width, 3) \
-  DEFAULT_FILTER_CASE() \
-  } \
-  break;
-
-#define SPARSE_CONV3D_CASE_FILTER_W(kKnownFilter_Height) \
-  case kKnownFilter_Height: \
-  switch (filter_w){ \
-  SPARSE_CONV3D_CASE_FILTER_D(kKnownFilter_Height, 1) \
-  SPARSE_CONV3D_CASE_FILTER_D(kKnownFilter_Height, 3) \
-  DEFAULT_FILTER_CASE() \
-  } \
-  break;
-*/
 #define SPARSE_CONV3D_KERNEL_CALL() \
     if((dilations_[0] == 1) && (dilations_[1] == 1) && (dilations_[2] == 1)){ \
       if((filter_h == 3) && (filter_w == 3) && (filter_h == 3)){ \
@@ -280,11 +275,13 @@ class SparseConv3DOp : public OpKernel {
  private:
   std::vector<int> strides_;
   std::vector<int> dilations_;
+  bool dynamic_default_;
  public:
   explicit SparseConv3DOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("strides", &strides_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("dilations", &dilations_));
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("dynamic_default", &dynamic_default_));
     OP_REQUIRES(ctx, strides_.size() == 3, errors::InvalidArgument("strides must be a vector have 3 element"));
     OP_REQUIRES(ctx, dilations_.size() == 3, errors::InvalidArgument("dilations must be a vector have 3 element"));
   }
@@ -331,25 +328,7 @@ class SparseConv3DOp : public OpKernel {
 
     #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d) \
       SparseConv3DFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
-                    strides_[0], \
-                    strides_[1],\
-                    strides_[2],\
-                    dilations_[0],\
-                    dilations_[1],\
-                    dilations_[2],\
-                    filter_h,\
-                    filter_w,\
-                    filter_d,\
-                    batch_size,\
-                    image_height,\
-                    image_width,\
-                    image_depth,\
-                    image_channels,\
-                    out_channel_num,\
-                    images.tensor<T, 5>().data(),\
-                    filter.tensor<T, 5>().data(), \
-                    default_channels_value.flat<T>().data(),\
-                    base_plane.tensor<int32, 4>().data(),\
+                    SPARSE_CONV3D_FUNCTOR_BASE_ARG_LIST, \
                     output->tensor<T, 5>().data());
     SPARSE_CONV3D_KERNEL_CALL();
     #undef FIXED_FILTER_SIZE_CASE
@@ -381,11 +360,13 @@ class SparseConv3DGradOp : public OpKernel {
  private:
   std::vector<int> strides_;
   std::vector<int> dilations_;
+  bool dynamic_default_;
  public:
   explicit SparseConv3DGradOp(OpKernelConstruction* ctx)
       : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("strides", &strides_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("dilations", &dilations_));
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("dynamic_default", &dynamic_default_));
     OP_REQUIRES(ctx, strides_.size() == 3, errors::InvalidArgument("strides must be a vector have 3 element"));
     OP_REQUIRES(ctx, dilations_.size() == 3, errors::InvalidArgument("dilations must be a vector have 3 element"));
   }
@@ -421,8 +402,11 @@ class SparseConv3DGradOp : public OpKernel {
                       && (base_plane.dim_size(1) == image_height) && (base_plane.dim_size(2) == image_width) && (base_plane.dim_size(3) == 1),
                 errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image"));
 
+    const auto out_height = (image_height + strides_[0] - 1)/strides_[0];
+    const auto out_width = (image_width + strides_[1] - 1)/strides_[1];
+    const auto out_depth = (image_depth + strides_[2] - 1)/strides_[2];
     OP_REQUIRES(ctx, (out_grad.shape().dims() == 5) && (out_grad.dim_size(0) == batch_size)
-                      && (out_grad.dim_size(1) == image_height) && (out_grad.dim_size(2) == image_width) && (out_grad.dim_size(3) == image_depth)
+                      && (out_grad.dim_size(1) == out_height) && (out_grad.dim_size(2) == out_width) && (out_grad.dim_size(3) == out_depth)
                       && (out_grad.dim_size(4) == out_channel_num),
                 errors::InvalidArgument("out_grad must have rank 5, and must compate to ref_image, got ", out_grad.shape().DebugString()));
 
@@ -438,37 +422,26 @@ class SparseConv3DGradOp : public OpKernel {
                             &filter_grad));
     Tensor *default_channels_value_grad;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
-                            2,
-                            default_channels_value.shape(),
-                            &default_channels_value_grad));
-
-
+                              2,
+                              default_channels_value.shape(),
+                              &default_channels_value_grad));
 
     #define FIXED_FILTER_SIZE_CASE(f_h, f_w, f_d, d_h, d_w, d_d) \
-      SparseConv3DGradFunctor<Device, T, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
-                    strides_[0], \
-                    strides_[1],\
-                    strides_[2],\
-                    dilations_[0],\
-                    dilations_[1],\
-                    dilations_[2],\
-                    filter_h,\
-                    filter_w,\
-                    filter_d,\
-                    batch_size,\
-                    image_height,\
-                    image_width,\
-                    image_depth,\
-                    image_channels,\
-                    out_channel_num,\
-                    images.tensor<T, 5>().data(),\
-                    filter.tensor<T, 5>().data(), \
-                    default_channels_value.flat<T>().data(),\
-                    base_plane.tensor<int32, 4>().data(),\
-                    out_grad.tensor<T, 5>().data(),\
-                    images_grad->tensor<T, 5>().data(),\
-                    filter_grad->tensor<T, 5>().data(),\
-                    default_channels_value_grad->flat<T>().data());
+      if(dynamic_default_){\
+        SparseConv3DGradFunctor<Device, T, true, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
+                      SPARSE_CONV3D_FUNCTOR_BASE_ARG_LIST,\
+                      out_grad.tensor<T, 5>().data(),\
+                      images_grad->tensor<T, 5>().data(),\
+                      filter_grad->tensor<T, 5>().data(),\
+                      default_channels_value_grad->flat<T>().data());\
+      } else {\
+        SparseConv3DGradFunctor<Device, T, false, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>()(ctx->eigen_device<Device>(), \
+                      SPARSE_CONV3D_FUNCTOR_BASE_ARG_LIST,\
+                      out_grad.tensor<T, 5>().data(),\
+                      images_grad->tensor<T, 5>().data(),\
+                      filter_grad->tensor<T, 5>().data(),\
+                      default_channels_value_grad->flat<T>().data());\
+      }
 
     SPARSE_CONV3D_KERNEL_CALL();
     #undef FIXED_FILTER_SIZE_CASE
