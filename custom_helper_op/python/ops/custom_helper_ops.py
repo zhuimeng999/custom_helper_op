@@ -237,6 +237,8 @@ def _sparse_conv3d_grad(op, out_grad):
                                                                                           dilations=op.get_attr("dilations"),
                                                                                           dynamic_default=op.get_attr("dynamic_default")
                                                                                           )
+    if op.get_attr("dynamic_default") is False:
+        default_value_grad = None
     return [images_grad, filter_grad, default_value_grad, None]
 
 tf.no_gradient("SparseConv3DGrad")
