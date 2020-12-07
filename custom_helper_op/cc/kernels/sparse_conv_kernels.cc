@@ -255,7 +255,9 @@ using functor::SparseConv3DFunctor;
           FIXED_FILTER_SIZE_CASE(3, 3, 3, 1, 1, 1, 1, 1, 1);\
         } else if((strides_[0] == 2) && (strides_[1] == 2) && (strides_[2] == 2)){\
           FIXED_FILTER_SIZE_CASE(3, 3, 3, 1, 1, 1, 2, 2, 2);\
-        } else {\
+        } else if((strides_[0] == 2) && (strides_[1] == 2) && (strides_[2] == 1)){\
+          FIXED_FILTER_SIZE_CASE(3, 3, 3, 1, 1, 1, 2, 2, 1);\
+        }else {\
           FIXED_FILTER_SIZE_CASE(-1, -1, -1, -1, -1, -1, -1, -1, -1);\
         }\
       } else { \

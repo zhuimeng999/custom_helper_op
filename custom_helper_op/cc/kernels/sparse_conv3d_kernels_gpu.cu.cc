@@ -205,6 +205,7 @@ void SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LI
 #define SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(instance_type) \
                 template struct SparseConv3DFunctor<GPUDevice, instance_type, 3, 3, 3, 1, 1, 1, 1, 1, 1>; \
                 template struct SparseConv3DFunctor<GPUDevice, instance_type, 3, 3, 3, 1, 1, 1, 2, 2, 2>; \
+                template struct SparseConv3DFunctor<GPUDevice, instance_type, 3, 3, 3, 1, 1, 1, 2, 2, 1>; \
                 template struct SparseConv3DFunctor<GPUDevice, instance_type, -1, -1, -1, -1, -1, -1, -1, -1, -1>;
 
 // #define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d, s_h, s_w, s_d) \
@@ -479,9 +480,11 @@ void SparseConv3DGradFunctor<Eigen::GpuDevice, T, dynamic_default, SPARSE_CONV3D
 #define SPARSE_CONV3D_GRAD_DEFINE_INSTANCE_WITH_TYPE(instance_type) \
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, 3, 3, 3, 1, 1, 1, 1, 1, 1>; \
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, 3, 3, 3, 1, 1, 1, 2, 2, 2>; \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, 3, 3, 3, 1, 1, 1, 2, 2, 1>; \
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, -1, -1, -1, -1, -1, -1, -1, -1, -1>;\
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, 3, 3, 3, 1, 1, 1, 1, 1, 1>; \
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, 3, 3, 3, 1, 1, 1, 2, 2, 2>; \
+                template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, 3, 3, 3, 1, 1, 1, 2, 2, 1>; \
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, -1, -1, -1, -1, -1, -1, -1, -1, -1>;
 
 SPARSE_CONV3D_GRAD_DEFINE_INSTANCE_WITH_TYPE(float);

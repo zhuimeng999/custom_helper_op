@@ -54,6 +54,7 @@ class CostMapLayerV2(tf.keras.layers.Layer):
     def __init__(self, reduce_method="MIN", half_centor=True, default_type='DYNAMIC', groups=1, **kwargs):
         super(CostMapLayerV2, self).__init__(**kwargs)
         assert reduce_method in ["MEAN", "MIN"]
+        assert tf.is_tensor(default_type) or (isinstance(default_type, str) and (default_type in ['CONSTANT', 'DYNAMIC']))
 
         self.reduce_method = reduce_method
         self.half_centor = half_centor
@@ -61,12 +62,11 @@ class CostMapLayerV2(tf.keras.layers.Layer):
         self.groups = groups
 
     def build(self, input_shape):
-        if self.default_type == 'DYNAMIC':
-            self.default_cost = self.add_weight(shape=[], initializer="zeros", trainable=True, name='CostMapDefault')
-        elif self.default_type == 'CONSTANT':
-            self.default_cost = self.add_weight(shape=[], initializer="zeros", trainable=False, name='CostMapDefault')
+        if tf.is_tensor(self.default_type):
+            self.default_cost = self.default_type
         else:
-            self.default_value = self.default_type
+            default_is_trainable = False if self.default_type == 'CONSTANT' else True
+            self.default_cost = self.add_weight(shape=[], initializer="zeros", trainable=default_is_trainable, name='CostMapDefault')
 
     def call(self, inputs, **kwargs):
         cost, cost_mask = cost_volume_v2(*inputs, reduce_method=self.reduce_method, groups=self.groups, half_centor=self.half_centor)
@@ -82,6 +82,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
         assert len(kernel_size) == 3
         assert len(strides) == 3
         assert len(dilations) == 3
+        assert tf.is_tensor(default_type) or (isinstance(default_type, str) and (default_type in ['CONSTANT', 'DYNAMIC']))
 
         self.filters = filters
         self.kernel_size = kernel_size
@@ -105,22 +106,17 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
                 initializer='zeros',
                 dtype=self.dtype,
                 trainable=True)
-                
-        if self.default_type == 'CONSTANT':
-            self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=False, dtype=self.dtype, name='sparse_conv3d_default')
-        elif self.default_type == 'DYNAMIC':
-            self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=True, dtype=self.dtype, name='sparse_conv3d_default')
-        else:
+        if tf.is_tensor(self.default_type):
             self.default_value = self.default_type
+        else:
+            default_is_trainable = False if self.default_type == 'CONSTANT' else True
+            self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=default_is_trainable, dtype=self.dtype, name='sparse_conv3d_default')
+            
 
     def call(self, inputs, **kwargs):
         images, base_plane = inputs
-        if self.default_type == 'CONSTANT':
-            dynamic_default = False
-        elif self.default_type == 'DYNAMIC':
-            dynamic_default = True
-        else:
-            dynamic_default = self.default_value.trainable
+        
+        dynamic_default = self.default_value.trainable
             
         out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
         if self.use_bias:
@@ -137,6 +133,8 @@ class SparseConv3DTransposeLayer(tf.keras.layers.Layer):
         assert (strides[0] > 1) or (strides[1] > 1) or (strides[2] > 1) 
         assert (dilations[0] == 1) and (dilations[1] == 1) and (dilations[2] == 1)
 
+        assert tf.is_tensor(default_type) or (isinstance(default_type, str) and (default_type in ['CONSTANT', 'DYNAMIC']))
+
         self.filters = filters
         self.kernel_size = kernel_size
         self.strides = strides
@@ -160,23 +158,18 @@ class SparseConv3DTransposeLayer(tf.keras.layers.Layer):
                 dtype=self.dtype,
                 trainable=True)
                 
-        if self.default_type == 'CONSTANT':
-            self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=False, dtype=self.dtype, name='sparse_conv3d_default')
-        elif self.default_type == 'DYNAMIC':
-            self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=True, dtype=self.dtype, name='sparse_conv3d_default')
-        else:
+        if tf.is_tensor(self.default_type):
             self.default_value = self.default_type
+        else:
+            default_is_trainable = False if self.default_type == 'CONSTANT' else True
+            self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=default_is_trainable, dtype=self.dtype, name='sparse_conv3d_default')
+            
 
     def call(self, inputs, **kwargs):
         images, base_plane = inputs
 
         images = sparse_pad(images, base_plane, strides=self.strides, dilations=self.dilations)
-        if self.default_type == 'CONSTANT':
-            dynamic_default = False
-        elif self.default_type == 'DYNAMIC':
-            dynamic_default = True
-        else:
-            dynamic_default = self.default_value.trainable
+        dynamic_default = self.default_value.trainable
             
         out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=(1, 1, 1), dilations=(1, 1, 1), dynamic_default=dynamic_default)
         if self.use_bias:
