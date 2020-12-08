@@ -34,7 +34,6 @@ custom_op_library(
 
         "cc/kernels/deformable_conv_op.cc",
         "cc/kernels/deformable_conv_op.h",
-        "cc/kernels/deformable_conv2d_utils.h",
 
         "cc/kernels/index_initializer_kernels.cc",
         "cc/kernels/index_initializer.h",

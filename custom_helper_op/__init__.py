@@ -31,5 +31,4 @@ from custom_helper_op.python.layers.custom_layers import (DepthProjectLayer, Cos
                                                             SparseConv3DTransposeLayer)
 from custom_helper_op.python.layers.deformable_conv2d import (
     DeformableConv2D,
-    DeformablePSROIAlign,
 )

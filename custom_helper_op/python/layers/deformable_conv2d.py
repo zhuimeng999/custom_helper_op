@@ -1,4 +1,4 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2020 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,143 +12,132 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
-"""Tensorflow op performing correlation cost operation."""
+
+import typing
 
 import tensorflow as tf
 from typeguard import typechecked
 from tensorflow_addons.utils import types
-from tensorflow_addons.utils.resource_loader import LazySO
-from tensorflow.python.keras.utils import conv_utils
-from typing import Union
+import tensorflow_addons.utils.keras_utils as conv_utils
 
 from custom_helper_op.python.ops.custom_helper_ops import _custom_helper_ops
 
 
+@typechecked
 def _deformable_conv2d(
-    input,
-    filter,
-    offset,
-    mask,
-    strides=[1, 1, 1, 1],
-    num_groups=1,
-    deformable_groups=1,
-    im2col_step=1,
-    no_bias=True,
-    padding="VALID",
-    data_format="NHWC",
-    dilations=[1, 1, 1, 1],
+    input_tensor: tf.Tensor,
+    filter_tensor: tf.Tensor,
+    bias_tensor: tf.Tensor,
+    offset_tensor: tf.Tensor,
+    mask_tensor: tf.Tensor,
+    strides: typing.Union[tuple, list],
+    dilations: typing.Union[tuple, list],
+    weight_groups: int,
+    offset_groups: int,
+    padding: str,
 ):
-    if data_format == "NHWC":
-        input = tf.transpose(input, [0, 3, 1, 2])
-        filter = tf.transpose(filter, [3, 2, 0, 1])
-        offset = tf.transpose(offset, [0, 3, 1, 2])
-        mask = tf.transpose(mask, [0, 3, 1, 2])
-    ret = _custom_helper_ops.addons_deformable_conv2d(
-        input=input,
-        filter=filter,
-        offset=offset,
-        mask=mask,
-        strides=strides,
-        num_groups=num_groups,
-        deformable_groups=deformable_groups,
-        im2col_step=im2col_step,
-        no_bias=no_bias,
-        padding=padding,
-        data_format="NCHW",
-        dilations=dilations,
-    )
-    if data_format == "NHWC":
-        return tf.transpose(ret, [0, 2, 3, 1])
-    return ret
+    with tf.name_scope("deformable_conv2d"):
+        return _custom_helper_ops.deformable_conv2d(
+            input=input_tensor,
+            filter=filter_tensor,
+            bias=bias_tensor,
+            offset=offset_tensor,
+            mask=mask_tensor,
+            strides=strides,
+            weight_groups=weight_groups,
+            offset_groups=offset_groups,
+            padding=padding,
+            data_format="NCHW",
+            dilations=dilations,
+        )
 
 
-@tf.RegisterGradient("AddonsDeformableConv2D")
-def _deformable_conv2d_back_prop(op, grad):
-    """The gradients for `deform_conv`.
-        Args:
-        op: The `deform_conv` `Operation` that we are differentiating, which we can use
-        to find the inputs and outputs of the original op.
-        grad: Gradient with respect to the output of the `roi_pool` op.
-        Returns:
-        Gradients with respect to the input of `deform_conv`.
-    """
-    data = op.inputs[0]
+@tf.RegisterGradient("DeformableConv2D")
+def _deformable_conv2d_grad(op, grad):
+    input = op.inputs[0]
     filter = op.inputs[1]
-    offset = op.inputs[2]
-    mask = op.inputs[3]
-    """
-        .Attr("strides: list(int)")
-        .Attr("num_groups: int")
-        .Attr("deformable_groups: int")
-        .Attr("im2col_step: int")
-        .Attr("no_bias: bool = true")
-        .Attr(GetPaddingAttrString())
-        .Attr("data_format: {'NCHW' } = 'NCHW' ")
-        .Attr("dilations: list(int) = [1, 1, 1, 1]")
-    """
+    bias = op.inputs[2]
+    offset = op.inputs[3]
+    mask = op.inputs[4]
     strides = op.get_attr("strides")
+    weight_groups = op.get_attr("weight_groups")
+    offset_groups = op.get_attr("offset_groups")
+    padding = op.get_attr("padding")
     dilations = op.get_attr("dilations")
     data_format = op.get_attr("data_format")
-    im2col_step = op.get_attr("im2col_step")
-    no_bias = op.get_attr("no_bias")
-    pads = op.get_attr("padding")
-    num_groups = op.get_attr("num_groups")
-    deformable_groups = op.get_attr("deformable_groups")
-    """
-    REGISTER_OP("AddonsDeformableConv2DBackProp")
-        .Input("input: T")
-        .Input("filter: T")
-        .Input("offset: T")
-        .Input("mask: T")
-        .Input("out_grad: T")
-        .Output("x_grad: T")
-        .Output("filter_grad: T")
-        .Output("offset_grad: T")
-        .Output("mask_grad: T")
-        .Attr("T: {float, double}")
-        .Attr("strides: list(int)")
-        .Attr("num_groups: int")
-        .Attr("deformable_groups: int")
-        .Attr("im2col_step: int")
-        .Attr("no_bias: bool = true")
-        .Attr(GetPaddingAttrString())
-        .Attr("data_format: { 'NCHW' } = 'NCHW' ")
-        .Attr("dilations: list(int) = [1, 1, 1, 1]")
-    """
-    # compute gradient
-    data_grad = _custom_helper_ops.addons_deformable_conv2d_back_prop(
-        data,
+
+    data_grad = _custom_helper_ops.deformable_conv2d_grad(
+        input,
         filter,
+        bias,
         offset,
         mask,
         grad,
         strides=strides,
-        num_groups=num_groups,
-        deformable_groups=deformable_groups,
-        im2col_step=im2col_step,
-        no_bias=no_bias,
-        padding=pads,
-        data_format=data_format,
+        weight_groups=weight_groups,
+        offset_groups=offset_groups,
+        padding=padding,
         dilations=dilations,
+        data_format=data_format,
     )
-    return data_grad  # List of 4 Tensor, since we have 4 input
+    return data_grad
 
 
-@tf.keras.utils.register_keras_serializable(package="Addons")
+def conv_output_length(input_length, filter_size, padding, stride, dilation=1):
+    """Determines output length of a convolution given input length.
+
+    A copy of tensorflow.python.keras.util.
+
+    Arguments:
+        input_length: integer.
+        filter_size: integer.
+        padding: one of "same", "valid", "full", "causal"
+        stride: integer.
+        dilation: dilation rate, integer.
+
+    Returns:
+        The output length (integer).
+    """
+    if input_length is None:
+        return None
+    assert padding in {"same", "valid", "full", "causal"}
+    dilated_filter_size = filter_size + (filter_size - 1) * (dilation - 1)
+    if padding in ["same", "causal"]:
+        output_length = input_length
+    elif padding == "valid":
+        output_length = input_length - dilated_filter_size + 1
+    elif padding == "full":
+        output_length = input_length + dilated_filter_size - 1
+    return (output_length + stride - 1) // stride
+
+def normalize_padding(value):
+    """A copy of tensorflow.python.keras.util."""
+    if isinstance(value, (list, tuple)):
+        return value
+    padding = value.lower()
+    if padding not in {"valid", "same", "causal"}:
+        raise ValueError(
+            "The `padding` argument must be a list/tuple or one of "
+            '"valid", "same" (or "causal", only for `Conv1D). '
+            "Received: " + str(padding)
+        )
+    return padding
+
+@tf.keras.utils.register_keras_serializable()
 class DeformableConv2D(tf.keras.layers.Layer):
     @typechecked
     def __init__(
         self,
         filters: int,
-        kernel_size: Union[tuple, list] = (3, 3),
-        num_groups: int = 1,
-        deformable_groups: int = 1,
-        strides: Union[tuple, list] = (1, 1),
-        im2col: int = 1,
-        use_bias: bool = False,
+        kernel_size: typing.Union[int, tuple, list] = (3, 3),
+        strides: typing.Union[int, tuple, list] = (1, 1),
         padding: str = "valid",
-        data_format: str = "channels_last",
-        dilations: Union[tuple, list] = (1, 1),
+        data_format: str = "channels_first",
+        dilation_rate: typing.Union[int, tuple, list] = (1, 1),
+        weight_groups: int = 1,
+        offset_groups: int = 1,
+        use_mask: bool = False,
+        use_bias: bool = False,
         kernel_initializer: types.Initializer = None,
         bias_initializer: types.Initializer = None,
         kernel_regularizer: types.Regularizer = None,
@@ -157,271 +146,234 @@ class DeformableConv2D(tf.keras.layers.Layer):
         bias_constraint: types.Constraint = None,
         **kwargs
     ):
+        """Modulated Deformable Convolution Layer.
+
+        This layer implements from [Deformable ConvNets v2: More Deformable, Better Results]
+        (https://arxiv.org/abs/1811.11168)(Zhu et al.).
+
+        Arguments:
+          filters: Integer, the dimensionality of the output space (i.e. the number of
+            output filters in the convolution).
+          kernel_size: An integer or tuple/list of 2 integers, specifying the height
+            and width of the 2D convolution window. Can be a single integer to specify
+            the same value for all spatial dimensions.
+          strides: An integer or tuple/list of 2 integers, specifying the strides of
+            the convolution along the height and width. Can be a single integer to
+            specify the same value for all spatial dimensions. Specifying any stride
+            value != 1 is incompatible with specifying any `dilation_rate` value != 1.
+          padding: one of `"valid"` or `"same"` (case-insensitive).
+          data_format: Specifies the data format.
+            Possible values is:
+                "channels_first" float [batch, channels, height, width]
+                Defaults to `"channels_first"`.
+          dilation_rate: an integer or tuple/list of 2 integers, specifying the
+            dilation rate to use for dilated convolution. Can be a single integer to
+            specify the same value for all spatial dimensions.
+          weight_groups: A positive integer specifying the number of groups in which the
+            input is split along the channel axis. Each group is convolved separately
+            with `filters / weight_groups` filters. The output is the concatenation of all
+            the `weight_groups` results along the channel axis. Input channels and `filters`
+            must both be divisible by `groups`.
+          offset_groups: An integer specifying the number of groups in which the input is
+            split along the channel axis. Each group is convolved separately with
+            its group offset.
+          use_mask: Boolean, whether the layer uses a modulation input.
+          use_bias: Boolean, whether the layer uses a bias vector.
+          kernel_initializer: Initializer for the `kernel` weights matrix (see
+            `keras.initializers`).
+          bias_initializer: Initializer for the bias vector (see
+            `keras.initializers`).
+          kernel_regularizer: Regularizer function applied to the `kernel` weights
+            matrix (see `keras.regularizers`).
+          bias_regularizer: Regularizer function applied to the bias vector (see
+            `keras.regularizers`).
+          activity_regularizer: Regularizer function applied to the output of the
+            layer (its "activation") (see `keras.regularizers`).
+          kernel_constraint: Constraint function applied to the kernel matrix (see
+            `keras.constraints`).
+          bias_constraint: Constraint function applied to the bias vector (see
+            `keras.constraints`).
+        """
         super(DeformableConv2D, self).__init__(**kwargs)
+
         self.filters = filters
-        self.kernel_size = kernel_size
-        self.num_groups = num_groups
-        self.deformable_groups = deformable_groups
-        self.strides = strides
-        self.im2col = im2col
+        self.kernel_size = conv_utils.normalize_tuple(kernel_size, 2, "kernel_size")
+        self.strides = conv_utils.normalize_tuple(strides, 2, "strides")
+        self.padding = normalize_padding(padding)
+        self.data_format = conv_utils.normalize_data_format(data_format)
+        self.dilation_rate = conv_utils.normalize_tuple(
+            dilation_rate, 2, "dilation_rate"
+        )
+        self.weight_groups = weight_groups
+        self.offset_groups = offset_groups
+        self.use_mask = use_mask
         self.use_bias = use_bias
-        self.padding = padding
-        self.data_format = data_format
-        self.dilations = dilations
         self.kernel_initializer = tf.keras.initializers.get(kernel_initializer)
         self.bias_initializer = tf.keras.initializers.get(bias_initializer)
         self.kernel_regularizer = tf.keras.regularizers.get(kernel_regularizer)
         self.bias_regularizer = tf.keras.regularizers.get(bias_regularizer)
         self.kernel_constraint = tf.keras.constraints.get(kernel_constraint)
         self.bias_constraint = tf.keras.constraints.get(bias_constraint)
-        self.conv_offset = tf.keras.layers.Conv2D(
-            self.deformable_groups * 3 * self.kernel_size[0] * self.kernel_size[1],
-            kernel_size=self.kernel_size,
-            strides=(1, 1),
+
+        if self.padding == "causal":
+            raise ValueError("Causal padding is not supported.")
+
+        if self.data_format != "channels_first":
+            raise ValueError("`channels_last` data format is not supported.")
+
+        if self.filters % self.weight_groups != 0:
+            raise ValueError("filters must be divisible by weight_group.")
+
+        self.filter_weights = None
+        self.filter_bias = None
+        self.null_mask = None
+
+    def _validate_shapes(self, shapes):
+        if type(shapes) is not list:
+            raise ValueError("DeformableConv2D input must be list of Tensor.")
+        elif self.use_mask and len(shapes) != 3:
+            raise ValueError("DeformableConv2D input must be 3-length list of Tensor.")
+        elif not self.use_mask and len(shapes) != 2:
+            raise ValueError("DeformableConv2D input must be 2-length list of Tensor.")
+
+    def build(self, shapes):
+        self._validate_shapes(shapes)
+
+        input_shape = shapes[0]
+        offset_shape = shapes[1]
+        mask_shape = shapes[2] if self.use_mask else None
+
+        exp_off_c = self.offset_groups * 2 * self.kernel_size[0] * self.kernel_size[1]
+
+        off_b, off_c, off_h, off_w = offset_shape
+        in_b, in_c, in_h, in_w = input_shape
+
+        out_h = conv_output_length(
+            in_h,
+            self.kernel_size[0],
             padding=self.padding,
-            use_bias=self.use_bias,
-            data_format="channels_last",
-            kernel_initializer=self.kernel_initializer,
-            bias_initializer=self.bias_initializer,
-            kernel_regularizer=self.kernel_regularizer,
-            bias_regularizer=self.bias_regularizer,
-            kernel_constraint=self.kernel_constraint,
-            bias_constraint=self.bias_constraint,
+            stride=self.strides[0],
+            dilation=self.dilation_rate[0],
+        )
+        out_w = conv_output_length(
+            in_w,
+            self.kernel_size[1],
+            padding=self.padding,
+            stride=self.strides[1],
+            dilation=self.dilation_rate[1],
         )
 
-    def build(self, input_shape):
-        if self.data_format == "channels_last":
-            channel = int(input_shape[-1])
-        else:
-            channel = int(input_shape[1])
-        if self.data_format == "channels_last":
-            self.filter = self.add_weight(
-                name="filter",
-                shape=[self.kernel_size[0], self.kernel_size[1], channel, self.filters],
-                initializer=self.kernel_initializer,
-                regularizer=self.kernel_regularizer,
-                constraint=self.kernel_constraint,
+        if off_b != in_b or off_c != exp_off_c or off_h != out_h or off_w != out_w:
+            raise ValueError(
+                "DeformableConv2D Offset shape must be [{}, {}, {}, {}].".format(
+                    in_b, exp_off_c, out_h, out_w
+                )
+            )
+
+        if mask_shape is not None:
+            exp_mask_c = exp_off_c // 2
+
+            mask_b, mask_c, mask_h, mask_w = mask_shape
+
+            if (
+                mask_b != in_b
+                or mask_c != exp_mask_c
+                or mask_h != out_h
+                or mask_w != out_w
+            ):
+                raise ValueError(
+                    "DeformableConv2D Mask shape must be [{}, {}, {}, {}].".format(
+                        in_b, exp_mask_c, out_h, out_w
+                    )
+                )
+
+        # Channel first
+        shape = (
+            self.filters,
+            input_shape[1] // self.weight_groups,
+            self.kernel_size[0],
+            self.kernel_size[1],
+        )
+
+        self.filter_weights = self.add_weight(
+            name="filter",
+            shape=shape,
+            initializer=self.kernel_initializer,
+            regularizer=self.kernel_regularizer,
+            constraint=self.kernel_constraint,
+            trainable=True,
+        )
+
+        if self.use_bias:
+            self.filter_bias = self.add_weight(
+                name="bias",
+                shape=(self.filters,),
+                initializer=self.bias_initializer,
+                regularizer=self.bias_regularizer,
+                constraint=self.bias_constraint,
                 trainable=True,
             )
         else:
-            self.filter = self.add_weight(
-                name="filter",
-                shape=[self.filters, channel, self.kernel_size[0], self.kernel_size[1]],
-                initializer=self.kernel_initializer,
-                regularizer=self.kernel_regularizer,
-                constraint=self.kernel_constraint,
-                trainable=True,
-            )
+            self.filter_bias = tf.zeros((0,))
+
+        if not self.use_mask:
+            self.null_mask = tf.zeros((0, 0, 0, 0))
+
         self.built = True
 
-    def compute_output_shape(self, input_shape):
-        input_shape = tf.TensorShape(input_shape).as_list()
-        if self.data_format == "channels_last":
-            space = input_shape[1:-1]
-            new_space = []
-            for i in range(len(space)):
-                new_dim = conv_utils.conv_output_length(
-                    space[i],
-                    self.kernel_size[i],
-                    padding=self.padding,
-                    stride=self.strides[i],
-                    dilation=self.dilation_rate[i],
-                )
-                new_space.append(new_dim)
-            return tf.TensorShape([input_shape[0]] + new_space + [self.filters])
-        else:
-            space = input_shape[2:]
-            new_space = []
-            for i in range(len(space)):
-                new_dim = conv_utils.conv_output_length(
-                    space[i],
-                    self.kernel_size[i],
-                    padding=self.padding,
-                    stride=self.strides[i],
-                    dilation=self.dilation_rate[i],
-                )
-                new_space.append(new_dim)
-            return tf.TensorShape([input_shape[0], self.filters] + new_space)
+    def compute_output_shape(self, shapes):
+        self._validate_shapes(shapes)
+
+        input_shape = shapes[0]
+        in_b, _, in_h, in_w = input_shape
+
+        out_h = conv_output_length(
+            in_h,
+            self.kernel_size[0],
+            padding=self.padding,
+            stride=self.strides[0],
+            dilation=self.dilation_rate[0],
+        )
+        out_w = conv_output_length(
+            in_w,
+            self.kernel_size[1],
+            padding=self.padding,
+            stride=self.strides[1],
+            dilation=self.dilation_rate[1],
+        )
+
+        return tf.TensorShape([in_b, self.filters, out_h, out_w])
 
     def call(self, inputs, **kwargs):
-        """
-        Build static Graph
-        :param inputs: [B, Height, Width, Channel]
-        :param kwargs:
-        :return:
-        """
-        if self.data_format == "channels_first":
-            weight_info = self.conv_offset(tf.transpose(inputs, [0, 2, 3, 1]))
-        else:
-            weight_info = self.conv_offset(inputs)
-        tf_data_format = "NCHW"
-        tf_padding = "VALID"
-        if self.padding == "same":
-            tf_padding = "SAME"
-        if self.data_format == "channels_last":
-            tf_data_format = "NHWC"
-            o1, o2, mask = tf.split(weight_info, 3, axis=-1)
-            offset = tf.concat((o1, o2), axis=-1)
-            mask = tf.sigmoid(mask)
-        else:
-            o1, o2, mask = tf.split(tf.transpose(weight_info, [0, 3, 1, 2]), 3, axis=1)
-            offset = tf.concat((o1, o2), axis=1)
-            mask = tf.sigmoid(mask)
-        result = _deformable_conv2d(
-            input=inputs,
-            filter=self.filter,
-            offset=offset,
-            mask=mask,
-            strides=[1, self.strides[0], self.strides[1], 1],
-            num_groups=self.num_groups,
-            deformable_groups=self.deformable_groups,
-            im2col_step=self.im2col,
-            no_bias=(not self.use_bias),
-            padding=tf_padding,
-            data_format=tf_data_format,
-            dilations=[1, self.dilations[0], self.dilations[1], 1],
+        input_tensor = inputs[0]
+        offset_tensor = inputs[1]
+        mask_tensor = inputs[2] if self.use_mask else self.null_mask
+
+        return _deformable_conv2d(
+            input_tensor=tf.convert_to_tensor(input_tensor),
+            filter_tensor=tf.convert_to_tensor(self.filter_weights),
+            bias_tensor=tf.convert_to_tensor(self.filter_bias),
+            offset_tensor=tf.convert_to_tensor(offset_tensor),
+            mask_tensor=tf.convert_to_tensor(mask_tensor),
+            strides=self.strides,
+            weight_groups=self.weight_groups,
+            offset_groups=self.offset_groups,
+            padding="SAME" if self.padding == "same" else "VALID",
+            dilations=self.dilation_rate,
         )
-        return result
 
     def get_config(self):
         config = {
             "kernel_size": self.kernel_size,
             "filters": self.filters,
-            "num_groups": self.num_groups,
-            "deformable_groups": self.deformable_groups,
             "strides": self.strides,
-            "im2col": self.im2col,
-            "use_bias": self.use_bias,
             "padding": self.padding,
             "data_format": self.data_format,
-            "dilations": self.dilations,
+            "dilation_rate": self.dilation_rate,
+            "weight_groups": self.weight_groups,
+            "offset_groups": self.offset_groups,
+            "use_mask": self.use_mask,
+            "use_bias": self.use_bias,
         }
         base_config = super().get_config()
         return {**base_config, **config}
-
-
-@tf.RegisterGradient("AddonsDeformablePsroiPool")
-def _deformable_psroi_pool_back_prop(op, *grad):
-    data = op.inputs[0]
-    bbox = op.inputs[1]
-    trans = op.inputs[2]
-    top_count = op.outputs[1]
-    pooled_size = op.get_attr("pooled_size")
-    no_trans = op.get_attr("no_trans")
-    spatial_scale = op.get_attr("spatial_scale")
-    output_dim = op.get_attr("output_dim")
-    group_size = op.get_attr("group_size")
-    part_size = op.get_attr("part_size")
-    sample_per_part = op.get_attr("sample_per_part")
-    trans_std = op.get_attr("trans_std")
-    data_grad = _custom_helper_ops.addons_deformable_psroi_pool_back_prop(
-        data,
-        bbox,
-        trans,
-        top_count,
-        grad[0],
-        pooled_size=pooled_size,
-        no_trans=no_trans,
-        spatial_scale=spatial_scale,
-        output_dim=output_dim,
-        group_size=group_size,
-        part_size=part_size,
-        sample_per_part=sample_per_part,
-        trans_std=trans_std,
-    )
-    return [data_grad[0], tf.zeros_like(bbox), data_grad[1]]
-
-
-@tf.keras.utils.register_keras_serializable(package="Addons")
-class DeformablePSROIAlign(tf.keras.layers.Layer):
-    def __init__(
-        self,
-        output_dim: int = 256,
-        spatial_scale: float = 1 / 16,
-        group_size: int = 1,
-        pooled_size: int = 7,
-        sample_per_part: int = 4,
-        part_size: int = 7,
-        trans_std: int = 1,
-        data_format: str = "channels_last",
-    ):
-        super(DeformablePSROIAlign, self).__init__()
-        self.spatial_scale = spatial_scale
-        self.group_size = group_size
-        self.output_dim = output_dim
-        self.pooled_size = pooled_size
-        self.sample_per_part = sample_per_part
-        self.part_size = part_size
-        self.trans_std = trans_std
-        self.data_format = data_format
-        self.flat = tf.keras.layers.Flatten(data_format="channels_first")
-        self.fully_connect = tf.keras.layers.Dense(
-            self.pooled_size * self.pooled_size * 2
-        )
-
-    def compute_output_shape(self, input_shape):
-        data_shape = input_shape[0]
-        batch_size = data_shape[0]
-        if self.data_format == "channels_last":
-            return tf.TensorShape(
-                [batch_size, self.pooled_size, self.pooled_size, self.output_dim]
-            )
-        else:
-            return tf.TensorShape(
-                [batch_size, self.output_dim, self.pooled_size, self.pooled_size]
-            )
-
-    def call(self, inputs, **kwargs):
-        featuremap = inputs[0]
-        rois = inputs[1]
-        if self.data_format == "channels_last":
-            featuremap = tf.transpose(featuremap, perm=[0, 3, 1, 2])
-        (
-            offset_t,
-            top_count,
-        ) = _custom_helper_ops.addons_deformable_psroi_pool(
-            featuremap,
-            rois,
-            tf.convert_to_tensor(0.0),
-            pooled_size=self.pooled_size,
-            no_trans=True,
-            spatial_scale=self.spatial_scale,
-            output_dim=self.output_dim,
-            group_size=self.group_size,
-            part_size=self.part_size,
-            sample_per_part=self.sample_per_part,
-            trans_std=1.0,
-        )
-        offset_flat = self.flat(offset_t)
-        offset = self.fully_connect(offset_flat)
-        offset_reshape = tf.reshape(offset, shape=[-1, 2, 7, 7], name="offset_reshape")
-        ret, ret_count = _custom_helper_ops.addons_deformable_psroi_pool(
-            featuremap,
-            rois,
-            offset_reshape,
-            pooled_size=self.pooled_size,
-            no_trans=False,
-            spatial_scale=self.spatial_scale,
-            output_dim=self.output_dim,
-            group_size=self.group_size,
-            part_size=self.part_size,
-            sample_per_part=self.sample_per_part,
-            trans_std=self.trans_std,
-        )
-        if self.data_format == "channels_last":
-            ret = tf.transpose(ret, [0, 2, 3, 1])
-        return ret
-
-    def get_config(self):
-        config = {
-            "spatial_scale": self.spatial_scale,
-            "group_size": self.group_size,
-            "output_dim": self.output_dim,
-            "pooled_size": self.pooled_size,
-            "sample_per_part": self.sample_per_part,
-            "part_size": self.part_size,
-            "trans_std": self.trans_std,
-            "data_format": self.data_format,
-        }
-        base_config = super().get_config()
-        return {**config, **base_config}

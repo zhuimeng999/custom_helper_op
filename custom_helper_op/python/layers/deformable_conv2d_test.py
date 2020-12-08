@@ -1,4 +1,4 @@
-# Copyright 2019 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2020 The TensorFlow Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,258 +13,618 @@
 # limitations under the License.
 # ==============================================================================
 
+
+import pytest
 import numpy as np
 import tensorflow as tf
-import pytest
-import sys
-from custom_helper_op import (
+import tensorflow_addons.utils.keras_utils as conv_utils
+from custom_helper_op.python.layers.deformable_conv2d import (
     DeformableConv2D,
-    DeformablePSROIAlign,
+    _deformable_conv2d,
+    conv_output_length,
+    normalize_padding
 )
-from custom_helper_op.python.ops.custom_helper_ops  import _custom_helper_ops
-from tensorflow_addons.utils import test_utils
+
+@pytest.fixture(scope="function", params=["channels_first", "channels_last"])
+def data_format(request):
+    return request.param
+
+def finalizer():
+    tf.config.experimental_run_functions_eagerly(False)
+
+@pytest.fixture(scope="function", params=["eager_mode", "tf_function"])
+def maybe_run_functions_eagerly(request):
+    if request.param == "eager_mode":
+        tf.config.experimental_run_functions_eagerly(True)
+    elif request.param == "tf_function":
+        tf.config.experimental_run_functions_eagerly(False)
+
+    request.addfinalizer(finalizer)
+
+def _get_padding_length(
+    padding, filter_size, dilation_rate, stride, input_size, output_size
+):
+    effective_filter_size = (filter_size - 1) * dilation_rate + 1
+
+    pad = 0
+    if padding == "same":
+        pad = ((output_size - 1) * stride + effective_filter_size - input_size) // 2
+
+    return pad
 
 
-@test_utils.maybe_run_functions_eagerly
-class DeformableConv2DTest(tf.test.TestCase):
-    def _forward(
-        self,
-        input,
-        filters,
-        kernel_size=(3, 3),
-        num_groups=1,
-        deformable_groups=1,
-        strides=(1, 1),
-        im2col=1,
-        use_bias=False,
-        padding="valid",
-        data_format="channels_last",
-        dilations=(1, 1),
-    ):
-        input_op = tf.convert_to_tensor(input)
-        output = DeformableConv2D(
-            filters,
-            kernel_size,
-            num_groups,
-            deformable_groups,
-            strides,
-            im2col,
-            use_bias,
-            padding,
-            data_format,
-            dilations,
-        )(input_op)
+def _bilinear_interpolate(img, y, x):
+    max_height, max_width = img.shape
+
+    if y <= -1 or max_height <= y or x <= -1 or max_width <= x:
+        return 0.0
+
+    y_low = int(np.floor(y))
+    x_low = int(np.floor(x))
+    y_high = y_low + 1
+    w_high = x_low + 1
+
+    v1 = 0.0
+    if y_low >= 0 and x_low >= 0:
+        v1 = img[y_low, x_low]
+
+    v2 = 0.0
+    if y_low >= 0 and w_high <= max_width - 1:
+        v2 = img[y_low, w_high]
+
+    v3 = 0.0
+    if y_high <= max_height - 1 and x_low >= 0:
+        v3 = img[y_high, x_low]
+
+    v4 = 0.0
+    if y_high <= max_height - 1 and w_high <= max_width - 1:
+        v4 = img[y_high, w_high]
+
+    lh = y - y_low
+    lw = x - x_low
+    hh = 1 - lh
+    hw = 1 - lw
+
+    w1 = hh * hw
+    w2 = hh * lw
+    w3 = lh * hw
+    w4 = lh * lw
+
+    return w1 * v1 + w2 * v2 + w3 * v3 + w4 * v4
+
+
+def _expected(
+    input_tensor,
+    filter_tensor,
+    offset_tensor,
+    mask_tensor,
+    bias,
+    strides,
+    weight_groups,
+    offset_groups,
+    padding,
+    dilation_rate,
+):
+    input_tensor = input_tensor.numpy()
+    filter_tensor = filter_tensor.numpy()
+    offset_tensor = offset_tensor.numpy()
+    mask_tensor = mask_tensor.numpy()
+    bias = bias.numpy()
+
+    padding = normalize_padding(padding)
+
+    stride_rows, stride_cols = conv_utils.normalize_tuple(strides, 2, "strides")
+    dilation_rows, dilation_cols = conv_utils.normalize_tuple(
+        dilation_rate, 2, "dilation_rate"
+    )
+    filter_rows, filter_cols = filter_tensor.shape[-2:]
+
+    batches, input_channels, input_rows, input_cols = input_tensor.shape
+    output_channels = filter_tensor.shape[0]
+
+    output_rows = conv_output_length(
+        input_rows,
+        filter_rows,
+        padding=padding,
+        stride=stride_rows,
+        dilation=dilation_rows,
+    )
+    output_cols = conv_output_length(
+        input_cols,
+        filter_cols,
+        padding=padding,
+        stride=stride_cols,
+        dilation=dilation_cols,
+    )
+
+    padding_rows = _get_padding_length(
+        padding, filter_rows, dilation_rows, stride_rows, input_rows, output_rows
+    )
+    padding_cols = _get_padding_length(
+        padding, filter_cols, dilation_cols, stride_cols, input_cols, output_cols
+    )
+
+    input_channels_per_offset_group = input_channels // offset_groups
+
+    input_channels_per_weight_groups = filter_tensor.shape[1]
+    output_channels_per_weight_groups = output_channels // weight_groups
+
+    output = np.zeros((batches, output_channels, output_rows, output_cols))
+
+    if output.size == 0:
         return output
 
-    def _create_test_data(self, data_format):
-        height = 20
-        width = 20
-        channel = 3
-        batch = 1
-        val = np.random.uniform(size=[batch, height, width, channel]).astype(np.float32)
-        if data_format == "channels_first":
-            val = np.transpose(val, [0, 3, 1, 2])
-        return val
+    offset_tensor = offset_tensor.reshape((batches, -1, 2, output_rows, output_cols))
 
-    """
-    Because DeformableConv2D layer use built in random_normal initializer to initialize weight, So the output can't be actually tested, So here we just simple compare the result in tf.nn.conv2d and _deformable_conv2d function in deformable_conv2d.py.
-    """
+    for batch in range(batches):
+        for output_channel in range(output_channels):
+            for output_row in range(output_rows):
+                for output_col in range(output_cols):
+                    for filter_row in range(filter_rows):
+                        for filter_col in range(filter_cols):
+                            for input_channel in range(
+                                input_channels_per_weight_groups
+                            ):
+                                weight_group = (
+                                    output_channel // output_channels_per_weight_groups
+                                )
+                                current_input_channel = (
+                                    weight_group * input_channels_per_weight_groups
+                                    + input_channel
+                                )
 
-    def _forward_simple(self, data_format, use_gpu=False):
-        with test_utils.device(False):
-            batch_size = 4
-            padding = "SAME"
-            kernel_h = 3
-            kernel_w = 3
-            channel = 3
-            height = 20
-            width = 20
-            out_channel = 16
-            # input = tf.random.uniform(shape=[batch_size, channel, height, width], maxval=10)
-            input = tf.convert_to_tensor(
-                [i for i in range(batch_size * channel * height * width)],
-                dtype=tf.float32,
-            )
-            input = tf.reshape(input, [batch_size, channel, height, width])
-            input_trans = tf.transpose(input, [0, 2, 3, 1])
-            # filter = tf.random.uniform(
-            #        shape=[kernel_h, kernel_w, channel, out_channel], maxval=10
-            #    )
-            filter = tf.convert_to_tensor(
-                np.random.uniform(
-                    0, 1, [kernel_h, kernel_w, channel, out_channel]
-                ).astype(np.float32)
-            )
-            filter_deform = tf.transpose(filter, [3, 2, 0, 1])
-            offset = tf.constant(
-                [
-                    0.0
-                    for i in range(
-                        batch_size * kernel_h * kernel_w * 2 * height * width
-                    )
-                ],
-                shape=[batch_size, kernel_h * kernel_w * 2, height, width],
-            )
-            mask = tf.constant(
-                [1.0 for i in range(batch_size * kernel_h * kernel_w * height * width)],
-                shape=[batch_size, kernel_h * kernel_w, height, width],
-            )
-            result1 = _custom_helper_ops.addons_deformable_conv2d(
-                input=input,
-                filter=filter_deform,
-                offset=offset,
-                mask=mask,
-                strides=[1, 1, 1, 1],
-                num_groups=1,
-                deformable_groups=1,
-                im2col_step=1,
-                no_bias=True,
-                padding=padding,
-                data_format="NCHW",
-                dilations=[1, 1, 1, 1],
-            )
-            result2 = tf.nn.conv2d(input_trans, filter, [1, 1, 1, 1], padding)
-            result2 = tf.transpose(result2, [0, 3, 1, 2])
-            # print("Debug!", tf.reduce_mean(result1 - result2))
-            self.assertAllClose(result1, result2, 1e-4, 1e-4)
+                                offset_group = (
+                                    current_input_channel
+                                    // input_channels_per_offset_group
+                                )
+                                offset_idx = (
+                                    offset_group * (filter_rows * filter_cols)
+                                    + filter_row * filter_cols
+                                    + filter_col
+                                )
 
-    """
-    def _gradients(self, data_format, use_gpu=False):
-        with test_utils.device(use_gpu):
-            with tf.GradientTape(persistent=True) as tape:
-                val = self._create_test_data(data_format)
-                input = tf.constant(val, dtype=tf.float32)
-                if data_format == "channels_last":
-                    input = tf.transpose(input, [0, 3, 1, 2])
-                input_trans = tf.transpose(input, [0, 2, 3, 1])
-                padding = "SAME"
-                kernel_h = 3
-                kernel_w = 3
-                channel = 3
-                height = 20
-                width = 20
-                out_channel = 16
-                filter = tf.Variable(
-                    np.random.uniform(0, 1, [kernel_h, kernel_w, channel, out_channel]
-                    ).astype(np.float32)
-                )
-                tape.watch(filter)
-                filter_deform = tf.transpose(filter, [3, 2, 0, 1])
-                offset = tf.constant(
-                    [0.0 for i in range(kernel_h * kernel_w * 2 * height * width)],
-                    shape=[1, kernel_h * kernel_w * 2, height, width],
-                )
-                mask = tf.constant(
-                    [1.0 for i in range(kernel_h * kernel_w * height * width)],
-                    shape=[1, kernel_h * kernel_w, height, width],
-                )
-                result1 = _custom_helper_ops.addons_deformable_conv2d(
-                    input=input,
-                    filter=filter_deform,
-                    offset=offset,
-                    mask=mask,
-                    strides=[1, 1, 1, 1],
-                    num_groups=1,
-                    deformable_groups=1,
-                    im2col_step=1,
-                    no_bias=True,
-                    padding=padding,
-                    data_format="NCHW",
-                    dilations=[1, 1, 1, 1],
-                )
-                result2 = tf.nn.conv2d(input_trans, filter, [1, 1, 1, 1], "SAME")
-                grad1 = tape.gradient(result1, filter)
-                grad2 = tape.gradient(result2, filter)
-                self.assertAllClose(grad1, grad2, 1e-4, 1e-4)
-    """
+                                dy = offset_tensor[
+                                    batch, offset_idx, 0, output_row, output_col
+                                ]
+                                dx = offset_tensor[
+                                    batch, offset_idx, 1, output_row, output_col
+                                ]
 
-    def _keras(self, data_format, use_gpu=False):
-        inputs = self._create_test_data(data_format)
-        self._forward(inputs, 64, data_format=data_format)
+                                mask = (
+                                    mask_tensor[
+                                        batch, offset_idx, output_row, output_col
+                                    ]
+                                    if mask_tensor.size > 0
+                                    else 1
+                                )
 
-    def testForwardNCHW(self):
-        self._forward_simple(data_format="channels_first", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._forward_simple(data_format="channels_first", use_gpu=True)
+                                y = (
+                                    stride_rows * output_row
+                                    - padding_rows
+                                    + dilation_rows * filter_row
+                                    + dy
+                                )
+                                x = (
+                                    stride_cols * output_col
+                                    - padding_cols
+                                    + dilation_cols * filter_col
+                                    + dx
+                                )
 
-    def testForwardNHWC(self):
-        self._forward_simple(data_format="channels_last", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._forward_simple(data_format="channels_last", use_gpu=True)
+                                output[
+                                    batch, output_channel, output_row, output_col
+                                ] += (
+                                    mask
+                                    * filter_tensor[
+                                        output_channel,
+                                        input_channel,
+                                        filter_row,
+                                        filter_col,
+                                    ]
+                                    * _bilinear_interpolate(
+                                        input_tensor[
+                                            batch, current_input_channel, :, :
+                                        ],
+                                        y,
+                                        x,
+                                    )
+                                )
 
-    """
-    def testBackwardNCHW(self):
-        self._gradients(data_format="channels_first", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._gradients(data_format="channels_first", use_gpu=True)
+    if bias.size > 0:
+        output += bias.reshape((1, output_channels, 1, 1))
 
-    def testBackwardNHWC(self):
-        self._gradients(data_format="channels_last", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._gradients(data_format="channels_last", use_gpu=True)
-    """
-
-    def testKerasNCHW(self):
-        self._keras(data_format="channels_first", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._keras(data_format="channels_first", use_gpu=True)
-
-    def testKerasNHWC(self):
-        self._keras(data_format="channels_last", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._keras(data_format="channels_last", use_gpu=True)
+    return output
 
 
-@test_utils.maybe_run_functions_eagerly
-class DeformablePSROIAlignTest(tf.test.TestCase):
-    def _forward_simple(self, data_format, use_gpu=False):
-        featuremap = tf.random.normal(shape=[1, 64, 100, 100])
-        rois = tf.convert_to_tensor(
-            [[0, 1, 1, 800, 800], [0, 2, 2, 400, 400]], dtype=tf.float32
+@pytest.mark.with_device(["cpu", "gpu"])
+@pytest.mark.usefixtures("maybe_run_functions_eagerly")
+@pytest.mark.parametrize("padding", ["same", "valid"])
+@pytest.mark.parametrize("batches", [0, 1, 2])
+def test_forward(data_format, padding, batches):
+    if data_format == "channels_last":
+        return
+
+    input_channels = 6
+    filters = 2
+    weight_groups = 2
+    offset_groups = 3
+
+    strides = (2, 1)
+    dilation_rate = (2, 1)
+    kernel_size = (3, 2)
+
+    input_rows, input_cols = 5, 4
+    filter_rows, filter_cols = kernel_size
+    stride_rows, stride_cols = strides
+    dilation_rows, dilation_cols = dilation_rate
+
+    output_rows = conv_output_length(
+        input_rows,
+        filter_rows,
+        padding=padding,
+        stride=stride_rows,
+        dilation=dilation_rows,
+    )
+    output_cols = conv_output_length(
+        input_cols,
+        filter_cols,
+        padding=padding,
+        stride=stride_cols,
+        dilation=dilation_cols,
+    )
+
+    offsets = offset_groups * filter_rows * filter_cols
+
+    input_tensor = tf.random.uniform([batches, input_channels, input_rows, input_cols])
+    offset_tensor = tf.random.uniform([batches, 2 * offsets, output_rows, output_cols])
+    mask_tensor = tf.random.uniform([batches, offsets, output_rows, output_cols])
+
+    conv = DeformableConv2D(
+        filters=filters,
+        kernel_size=kernel_size,
+        strides=strides,
+        padding=padding,
+        dilation_rate=dilation_rate,
+        weight_groups=weight_groups,
+        offset_groups=offset_groups,
+        use_mask=True,
+        use_bias=True,
+    )
+
+    actual = conv([input_tensor, offset_tensor, mask_tensor])
+
+    filter_tensor = conv.filter_weights
+    bias = conv.filter_bias
+
+    expected = _expected(
+        input_tensor,
+        filter_tensor,
+        offset_tensor,
+        mask_tensor,
+        bias,
+        strides,
+        weight_groups,
+        offset_groups,
+        padding,
+        dilation_rate,
+    )
+
+    np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-5)
+
+
+@pytest.mark.with_device(["cpu", "gpu"])
+@pytest.mark.usefixtures("maybe_run_functions_eagerly")
+@pytest.mark.parametrize("padding", ["same", "valid"])
+@pytest.mark.parametrize("batches", [0, 1, 2])
+def test_forward_no_mask(data_format, padding, batches):
+    if data_format == "channels_last":
+        return
+
+    input_channels = 6
+    filters = 2
+    weight_groups = 2
+    offset_groups = 3
+
+    strides = (2, 1)
+    dilation_rate = (2, 1)
+    kernel_size = (3, 2)
+
+    input_rows, input_cols = 5, 4
+    filter_rows, filter_cols = kernel_size
+    stride_rows, stride_cols = strides
+    dilation_rows, dilation_cols = dilation_rate
+
+    output_rows = conv_output_length(
+        input_rows,
+        filter_rows,
+        padding=padding,
+        stride=stride_rows,
+        dilation=dilation_rows,
+    )
+    output_cols = conv_output_length(
+        input_cols,
+        filter_cols,
+        padding=padding,
+        stride=stride_cols,
+        dilation=dilation_cols,
+    )
+
+    offsets = offset_groups * filter_rows * filter_cols
+
+    input_tensor = tf.random.uniform([batches, input_channels, input_rows, input_cols])
+    offset_tensor = tf.random.uniform([batches, 2 * offsets, output_rows, output_cols])
+
+    conv = DeformableConv2D(
+        filters=filters,
+        kernel_size=kernel_size,
+        strides=strides,
+        padding=padding,
+        dilation_rate=dilation_rate,
+        weight_groups=weight_groups,
+        offset_groups=offset_groups,
+        use_mask=False,
+        use_bias=True,
+    )
+
+    actual = conv([input_tensor, offset_tensor])
+
+    filter_tensor = conv.filter_weights
+    mask_tensor = conv.null_mask
+    bias = conv.filter_bias
+
+    expected = _expected(
+        input_tensor,
+        filter_tensor,
+        offset_tensor,
+        mask_tensor,
+        bias,
+        strides,
+        weight_groups,
+        offset_groups,
+        padding,
+        dilation_rate,
+    )
+
+    np.testing.assert_allclose(actual.numpy(), expected, rtol=1e-5)
+
+
+@pytest.mark.with_device(["cpu", "gpu"])
+@pytest.mark.parametrize("padding", ["same", "valid"])
+@pytest.mark.parametrize("batches", [0, 1, 2])
+def test_gradients(data_format, padding, batches):
+    if data_format == "channels_last":
+        return
+
+    input_channels = 6
+    filters = 2
+    weight_groups = 2
+    offset_groups = 3
+
+    strides = (2, 1)
+    dilation_rate = (2, 1)
+    kernel_size = (3, 2)
+
+    input_rows, input_cols = 5, 4
+    filter_rows, filter_cols = kernel_size
+    stride_rows, stride_cols = strides
+    dilation_rows, dilation_cols = dilation_rate
+
+    output_rows = conv_output_length(
+        input_rows,
+        filter_rows,
+        padding=padding,
+        stride=stride_rows,
+        dilation=dilation_rows,
+    )
+    output_cols = conv_output_length(
+        input_cols,
+        filter_cols,
+        padding=padding,
+        stride=stride_cols,
+        dilation=dilation_cols,
+    )
+
+    offsets = offset_groups * filter_rows * filter_cols
+
+    input_tensor = tf.random.uniform([batches, input_channels, input_rows, input_cols])
+    offset_tensor = tf.random.uniform([batches, 2 * offsets, output_rows, output_cols])
+    mask_tensor = tf.random.uniform([batches, offsets, output_rows, output_cols])
+
+    conv = DeformableConv2D(
+        filters=filters,
+        kernel_size=kernel_size,
+        strides=strides,
+        padding=padding,
+        dilation_rate=dilation_rate,
+        weight_groups=weight_groups,
+        offset_groups=offset_groups,
+        use_mask=True,
+        use_bias=True,
+    )
+
+    conv.build([tf.shape(input_tensor), tf.shape(offset_tensor), tf.shape(mask_tensor)])
+
+    def conv_fn(input_tensor, filter_weights, filter_bias, offset_tensor, mask_tensor):
+        return _deformable_conv2d(
+            input_tensor=tf.convert_to_tensor(input_tensor),
+            filter_tensor=tf.convert_to_tensor(filter_weights),
+            bias_tensor=tf.convert_to_tensor(filter_bias),
+            offset_tensor=tf.convert_to_tensor(offset_tensor),
+            mask_tensor=tf.convert_to_tensor(mask_tensor),
+            strides=conv.strides,
+            weight_groups=conv.weight_groups,
+            offset_groups=conv.offset_groups,
+            padding="SAME" if conv.padding == "same" else "VALID",
+            dilations=conv.dilation_rate,
         )
-        spatial_scale = 1 / 16
-        group_size = 1
-        pooled_size = 7
-        sample_per_part = 4
-        part_size = 7
-        trans_std = 1
-        (
-            offset_t,
-            top_count,
-        ) = _custom_helper_ops.addons_deformable_psroi_pool(
-            featuremap,
-            rois,
-            tf.convert_to_tensor(0),
-            pooled_size=pooled_size,
-            no_trans=True,
-            spatial_scale=spatial_scale,
-            output_dim=64,
-            group_size=group_size,
-            part_size=part_size,
-            sample_per_part=sample_per_part,
-            trans_std=trans_std,
+
+    theoretical, numerical = tf.test.compute_gradient(
+        conv_fn,
+        [
+            input_tensor,
+            conv.filter_weights,
+            conv.filter_bias,
+            offset_tensor,
+            mask_tensor,
+        ],
+    )
+
+    np.testing.assert_allclose(theoretical[0], numerical[0], atol=1e-3)
+    np.testing.assert_allclose(theoretical[1], numerical[1], atol=1e-3)
+    np.testing.assert_allclose(theoretical[2], numerical[2], atol=1e-3)
+    np.testing.assert_allclose(theoretical[3], numerical[3], atol=1e-3)
+    np.testing.assert_allclose(theoretical[4], numerical[4], atol=1e-3)
+
+
+@pytest.mark.with_device(["cpu", "gpu"])
+@pytest.mark.parametrize("padding", ["same", "valid"])
+@pytest.mark.parametrize("batches", [0, 1, 2])
+def test_gradients_no_mask(data_format, padding, batches):
+    if data_format == "channels_last":
+        return
+
+    input_channels = 6
+    filters = 2
+    weight_groups = 2
+    offset_groups = 3
+
+    strides = (2, 1)
+    dilation_rate = (2, 1)
+    kernel_size = (3, 2)
+
+    input_rows, input_cols = 5, 4
+    filter_rows, filter_cols = kernel_size
+    stride_rows, stride_cols = strides
+    dilation_rows, dilation_cols = dilation_rate
+
+    output_rows = conv_output_length(
+        input_rows,
+        filter_rows,
+        padding=padding,
+        stride=stride_rows,
+        dilation=dilation_rows,
+    )
+    output_cols = conv_output_length(
+        input_cols,
+        filter_cols,
+        padding=padding,
+        stride=stride_cols,
+        dilation=dilation_cols,
+    )
+
+    offsets = offset_groups * filter_rows * filter_cols
+
+    input_tensor = tf.random.uniform([batches, input_channels, input_rows, input_cols])
+    offset_tensor = tf.random.uniform([batches, 2 * offsets, output_rows, output_cols])
+
+    conv = DeformableConv2D(
+        filters=filters,
+        kernel_size=kernel_size,
+        strides=strides,
+        padding=padding,
+        dilation_rate=dilation_rate,
+        weight_groups=weight_groups,
+        offset_groups=offset_groups,
+        use_mask=False,
+        use_bias=True,
+    )
+
+    conv.build([tf.shape(input_tensor), tf.shape(offset_tensor)])
+
+    def conv_fn(input_tensor, filter_weights, filter_bias, offset_tensor):
+        return _deformable_conv2d(
+            input_tensor=tf.convert_to_tensor(input_tensor),
+            filter_tensor=tf.convert_to_tensor(filter_weights),
+            bias_tensor=tf.convert_to_tensor(filter_bias),
+            offset_tensor=tf.convert_to_tensor(offset_tensor),
+            mask_tensor=tf.convert_to_tensor(conv.null_mask),
+            strides=conv.strides,
+            weight_groups=conv.weight_groups,
+            offset_groups=conv.offset_groups,
+            padding="SAME" if conv.padding == "same" else "VALID",
+            dilations=conv.dilation_rate,
         )
-        return offset_t
 
-    def _keras(self, data_format, use_gpu=False):
-        featuremap = tf.random.normal(shape=[1, 64, 100, 100])
-        rois = tf.convert_to_tensor(
-            [[0, 1, 1, 800, 800], [0, 2, 2, 400, 400]], dtype=tf.float32
-        )
-        psroilayer = DeformablePSROIAlign(output_dim=64, data_format="channels_first")
-        ret = psroilayer([featuremap, rois])
-        return ret
+    theoretical, numerical = tf.test.compute_gradient(
+        conv_fn, [input_tensor, conv.filter_weights, conv.filter_bias, offset_tensor]
+    )
 
-    def testKerasNCHW(self):
-        self._keras(data_format="channels_first", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._keras(data_format="channels_first", use_gpu=True)
+    np.testing.assert_allclose(theoretical[0], numerical[0], atol=1e-3)
+    np.testing.assert_allclose(theoretical[1], numerical[1], atol=1e-3)
+    np.testing.assert_allclose(theoretical[2], numerical[2], atol=1e-3)
+    np.testing.assert_allclose(theoretical[3], numerical[3], atol=1e-3)
 
-    def testKerasNHWC(self):
-        self._keras(data_format="channels_last", use_gpu=False)
-        if tf.test.is_gpu_available():
-            self._keras(data_format="channels_last", use_gpu=True)
 
+@pytest.mark.with_device(["cpu", "gpu"])
+def test_keras(data_format):
+    if data_format == "channels_last":
+        return
+
+    batches = 1
+    input_channels = 6
+    filters = 2
+    weight_groups = 2
+    offset_groups = 3
+
+    strides = (2, 1)
+    padding = "same"
+    dilation_rate = (2, 1)
+    kernel_size = (3, 2)
+
+    input_rows, input_cols = 5, 4
+    filter_rows, filter_cols = kernel_size
+    stride_rows, stride_cols = strides
+    dilation_rows, dilation_cols = dilation_rate
+
+    output_rows = conv_output_length(
+        input_rows,
+        filter_rows,
+        padding=padding,
+        stride=stride_rows,
+        dilation=dilation_rows,
+    )
+    output_cols = conv_output_length(
+        input_cols,
+        filter_cols,
+        padding=padding,
+        stride=stride_cols,
+        dilation=dilation_cols,
+    )
+
+    offsets = offset_groups * filter_rows * filter_cols
+
+    input_tensor = tf.random.uniform([batches, input_channels, input_rows, input_cols])
+    offset_tensor = tf.random.uniform([batches, 2 * offsets, output_rows, output_cols])
+    mask_tensor = tf.random.uniform([batches, offsets, output_rows, output_cols])
+
+    input_a = tf.keras.Input([input_channels, input_rows, input_cols])
+    input_b = tf.keras.Input([2 * offsets, output_rows, output_cols])
+    input_c = tf.keras.Input([offsets, output_rows, output_cols])
+
+    conv = DeformableConv2D(
+        filters=filters,
+        kernel_size=kernel_size,
+        strides=strides,
+        padding=padding,
+        dilation_rate=dilation_rate,
+        weight_groups=weight_groups,
+        offset_groups=offset_groups,
+        use_mask=True,
+        use_bias=True,
+    )
+
+    expected_output_shape = tuple(
+        conv.compute_output_shape([input_a.shape, input_b.shape, input_c.shape])
+    )
+
+    x = [input_a, input_b, input_c]
+    y = conv(x)
+    model = tf.keras.models.Model(x, y)
+    actual_output = model([input_tensor, offset_tensor, mask_tensor])
+
+    assert tf.keras.backend.dtype(y[0]) == "float32"
+    assert actual_output.shape[1:] == expected_output_shape[1:]
 
 if __name__ == "__main__":
-    sys.exit(pytest.main([__file__]))
+    import pytest
+    raise SystemExit(pytest.main([__file__]))
