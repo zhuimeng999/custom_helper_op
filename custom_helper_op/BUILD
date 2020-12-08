@@ -29,6 +29,9 @@ custom_op_library(
         "cc/kernels/sparse_conv_kernels.cc",
         "cc/kernels/sparse_conv.h",
 
+        "cc/kernels/sparse_conv3d_fast_op.cc",
+        "cc/kernels/sparse_conv3d_fast_op.h",
+
         "cc/kernels/sparse_pad_kernels.cc",
         "cc/kernels/sparse_pad.h",
 
@@ -62,6 +65,9 @@ custom_op_library(
         "cc/kernels/sparse_conv.h",
         "cc/kernels/sparse_conv2d_kernels_gpu.cu.cc",
         "cc/kernels/sparse_conv3d_kernels_gpu.cu.cc",
+
+        "cc/kernels/sparse_conv3d_fast_op_gpu.cu.cc",
+        "cc/kernels/sparse_conv3d_fast_op.h",
 
         "cc/kernels/sparse_pad_kernels_gpu.cu.cc",
         "cc/kernels/sparse_pad.h",
@@ -161,6 +167,18 @@ py_test(
         "python/ops/op_tests/sparse_pad_op_test.py"
     ],
     main = "python/ops/op_tests/sparse_pad_op_test.py",
+    deps = [
+        ":custom_helper_op",
+    ],
+    srcs_version = "PY2AND3",
+)
+
+py_test(
+    name = "sparse_conv_fast_op_py_test",
+    srcs = [
+        "python/ops/op_tests/sparse_conv_fast_op_test.py"
+    ],
+    main = "python/ops/op_tests/sparse_conv_fast_op_test.py",
     deps = [
         ":custom_helper_op",
     ],

@@ -587,6 +587,60 @@ REGISTER_OP("SparseConv3DGrad")
     });
 
 // V2 op supports output_shape.
+REGISTER_OP("SparseConv3DFast")
+    .Input("images: dtype")
+    .Input("filters: dtype")
+    .Input("default_value: dtype")
+    .Input("base_plane: int32")
+    .Output("output: dtype")
+    .Attr("dtype: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int)")
+    .Attr("dynamic_default: bool")
+    .Attr("data_format: { 'NCHW' }")
+    .SetShapeFn([](InferenceContext *c) {
+      std::vector<int32> strides;
+      TF_RETURN_IF_ERROR(c->GetAttr("strides", &strides));
+      ShapeHandle image_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &image_shape));
+      ShapeHandle filter_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 5, &filter_shape));
+      auto batch_dim = c->Dim(image_shape, 0);
+      auto image_height    = c->Value(c->Dim(image_shape, 1));
+      auto image_width     = c->Value(c->Dim(image_shape, 2));
+      auto image_depth     = c->Value(c->Dim(image_shape, 3));
+      auto out_channel_num = c->Value(c->Dim(filter_shape, 4));
+
+      const auto out_height = (image_height + strides[0] - 1)/strides[0];
+      const auto out_width = (image_width + strides[1] - 1)/strides[1];
+      const auto out_depth = (image_depth + strides[2] - 1)/strides[2];
+      c->set_output(0, c->MakeShape({batch_dim, out_height, out_width, out_depth, out_channel_num}));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
+REGISTER_OP("SparseConv3DFastGrad")
+    .Input("images: dtype")
+    .Input("filters: dtype")
+    .Input("default_value: dtype")
+    .Input("base_plane: int32")
+    .Input("out_grad: dtype")
+    .Output("images_grad: dtype")
+    .Output("filter_grad: dtype")
+    .Output("default_value_grad: dtype")
+    .Attr("dtype: {float, double}")
+    .Attr("strides: list(int)")
+    .Attr("dilations: list(int)")
+    .Attr("dynamic_default: bool")
+    .Attr("data_format: { 'NCHW' }")
+    .SetShapeFn([](InferenceContext* c) {
+      c->set_output(0, c->input(0));
+      c->set_output(1, c->input(1));
+      c->set_output(2, c->input(2));
+      return Status::OK();
+    });
+
+// V2 op supports output_shape.
 REGISTER_OP("IndexInitializer")
     .Input("output_shape: int32")
     .Attr("half_centor: bool")
