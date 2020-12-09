@@ -261,9 +261,10 @@ def _sparse_conv3d_grad(op, out_grad):
 tf.no_gradient("SparseConv3DGrad")
 
 @tf.function
-def sparse_conv3d_fast(images, filters, default_value, base_plane, strides=(1, 1, 1), dilations=(1, 1, 1), dynamic_default=False, name=None):
+def sparse_conv3d_fast(images, filters, default_value, base_plane, data_format='NDHWC', strides=(1, 1, 1), dilations=(1, 1, 1), dynamic_default=False, name=None):
     with tf.name_scope(name or "sparse_conv3d_fast"):
-        return _custom_helper_ops.sparse_conv3d_fast(images=images, filters=filters, default_value=default_value, base_plane=base_plane, strides=strides, dilations=dilations, dynamic_default=dynamic_default)
+        return _custom_helper_ops.sparse_conv3d_fast(images=images, filters=filters, default_value=default_value, base_plane=base_plane, 
+                                                        data_format=data_format, strides=strides, dilations=dilations, dynamic_default=dynamic_default)
 
 
 @tf.RegisterGradient("SparseConv3DFast")
@@ -275,6 +276,7 @@ def _sparse_conv3d_fast_grad(op, out_grad):
                                                                                           default_value=default_value,
                                                                                           base_plane=base_plane, 
                                                                                           out_grad=out_grad,
+                                                                                          data_format=op.get_attr('data_format'),
                                                                                           strides=op.get_attr("strides"),
                                                                                           dilations=op.get_attr("dilations"),
                                                                                           dynamic_default=op.get_attr("dynamic_default")

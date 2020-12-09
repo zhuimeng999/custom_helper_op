@@ -597,7 +597,7 @@ REGISTER_OP("SparseConv3DFast")
     .Attr("strides: list(int)")
     .Attr("dilations: list(int)")
     .Attr("dynamic_default: bool")
-    .Attr("data_format: { 'NCHW' }")
+    .Attr("data_format: { 'NDHWC' }")
     .SetShapeFn([](InferenceContext *c) {
       std::vector<int32> strides;
       TF_RETURN_IF_ERROR(c->GetAttr("strides", &strides));
@@ -632,7 +632,7 @@ REGISTER_OP("SparseConv3DFastGrad")
     .Attr("strides: list(int)")
     .Attr("dilations: list(int)")
     .Attr("dynamic_default: bool")
-    .Attr("data_format: { 'NCHW' }")
+    .Attr("data_format: { 'NDHWC' }")
     .SetShapeFn([](InferenceContext* c) {
       c->set_output(0, c->input(0));
       c->set_output(1, c->input(1));
