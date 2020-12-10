@@ -323,15 +323,13 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                     //   GpuAtomicAdd(&f_grad_o_ptr[o_c], aggregate);
                     // }
                     T in_data = 0.;
-                    if(i < count){
-                      if(is_padding_d){
-                        in_data = __ldg(default_channel_value);
-                      } else {
-                        in_data = __ldg(im_d_ptr + f_c);
-                      }
-                      in_data = in_data*__ldg(out_grad_channel + o_c);
-                      tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
+                    if(is_padding_d){
+                      in_data = __ldg(default_channel_value);
+                    } else {
+                      in_data = __ldg(im_d_ptr + f_c);
                     }
+                    in_data = in_data*__ldg(out_grad_channel + o_c);
+                    tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
                     int warp_id = threadIdx.x / 32;
                     T aggregate = WarpReduce(temp_storage[warp_id]).Sum(in_data);
                     if((threadIdx.x % 32) == 0){
