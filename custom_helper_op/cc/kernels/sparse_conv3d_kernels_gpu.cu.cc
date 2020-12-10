@@ -218,15 +218,15 @@ __global__ void SparseConv3DGradKernel(const int32 count,
   // GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char , shared_memory);
   // T* const shared_data = reinterpret_cast<T*>(shared_memory);
 
-  // // Specialize BlockReduce type for our thread block
-  // typedef cub::BlockReduce<T, BLOCK_THREADS> BlockReduceT;
-  // // Shared memory
-  // __shared__ typename BlockReduceT::TempStorage temp_storage;
+  // Specialize BlockReduce type for our thread block
+  typedef cub::BlockReduce<T, BLOCK_THREADS> BlockReduceT;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
 
-  // Specialize WarpReduce for type int
-  typedef cub::WarpReduce<T> WarpReduce;
-  // Allocate WarpReduce shared memory for 4 warps
-  __shared__ typename WarpReduce::TempStorage temp_storage[BLOCK_THREADS/32];
+  // // Specialize WarpReduce for type int
+  // typedef cub::WarpReduce<T> WarpReduce;
+  // // Allocate WarpReduce shared memory for 4 warps
+  // __shared__ typename WarpReduce::TempStorage temp_storage[BLOCK_THREADS/32];
 
   const int filter_h = kKnownFilterHeight < 0 ? filter_h_arg: kKnownFilterHeight;
   const int filter_w = kKnownFilterWidth < 0 ? filter_w_arg: kKnownFilterWidth;
@@ -244,7 +244,7 @@ __global__ void SparseConv3DGradKernel(const int32 count,
   const auto filter_depth_step = image_channels*out_channel_num;
   const auto filter_width_step = filter_d*filter_depth_step;
   const auto filter_height_step = filter_w*filter_width_step;
-  volatile T in_data = 0.;
+  
   for (const auto i : GpuGridRangeX<INDEX_TYPE>(count)) {
     int32 d = i%out_depth;
     INDEX_TYPE depth_map_pos = i/out_depth;
@@ -263,7 +263,7 @@ __global__ void SparseConv3DGradKernel(const int32 count,
       depth_map_pos = (b*image_height+h)*image_width+w;
     }
 
-    d = d + ((base_plane_data[depth_map_pos] + stride_d - 1)/stride_d)*stride_d - base_plane_data[depth_map_pos];
+    d = d + ((__ldg(base_plane_data + depth_map_pos) + stride_d - 1)/stride_d)*stride_d - __ldg(base_plane_data + depth_map_pos);
 
 
     const auto image_start_h = h - (filter_h/2)*dilations_h;
@@ -312,29 +312,41 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                   T tmp = T(0);
                   for(int o_c = 0; o_c < out_channel_num; o_c++){
                     // /* output channel loop */
-                    // in_data = is_padding_d?__ldg(default_channel_value):__ldg(im_d_ptr + f_c);
-                    // in_data = in_data *__ldg(out_grad_channel + o_c);
-                    // tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
-
-                    // const auto aggregate = BlockReduceT(temp_storage).Sum(in_data);
-                    // in_data = 0.;
-                    // //__syncthreads(); //A subsequent __syncthreads() threadblock barrier should be invoked after calling this method if the collective's temporary storage (e.g., temp_storage) is to be reused or repurposed
-                    // if (threadIdx.x == 0){
-                    //   GpuAtomicAdd(&f_grad_o_ptr[o_c], aggregate);
-                    // }
                     T in_data = 0.;
                     if(is_padding_d){
                       in_data = __ldg(default_channel_value);
                     } else {
                       in_data = __ldg(im_d_ptr + f_c);
                     }
-                    in_data = in_data*__ldg(out_grad_channel + o_c);
+
+                    in_data = in_data *__ldg(out_grad_channel + o_c);
                     tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
-                    int warp_id = threadIdx.x / 32;
-                    T aggregate = WarpReduce(temp_storage[warp_id]).Sum(in_data);
-                    if((threadIdx.x % 32) == 0){
+
+                    int num_threads = count - (i/BLOCK_THREADS)*BLOCK_THREADS;
+                    if(num_threads >= BLOCK_THREADS){
+                      num_threads = BLOCK_THREADS;
+                    }
+                    
+                    const auto aggregate = BlockReduceT(temp_storage).Sum(in_data, num_threads);
+
+                    //__syncthreads(); //A subsequent __syncthreads() threadblock barrier should be invoked after calling this method if the collective's temporary storage (e.g., temp_storage) is to be reused or repurposed
+                    if (threadIdx.x == 0){
                       GpuAtomicAdd(&f_grad_o_ptr[o_c], aggregate);
                     }
+                    // T in_data = 0.;
+                    // if(is_padding_d){
+                    //   in_data = __ldg(default_channel_value);
+                    // } else {
+                    //   in_data = __ldg(im_d_ptr + f_c);
+                    // }
+                    // in_data = in_data*__ldg(out_grad_channel + o_c);
+                    // tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
+
+                    // int warp_id = threadIdx.x / 32;
+                    // T aggregate = WarpReduce(temp_storage[warp_id]).Sum(in_data);
+                    // if((threadIdx.x % 32) == 0){
+                    //   GpuAtomicAdd(&f_grad_o_ptr[o_c], aggregate);
+                    // }
                   }
                   const auto in_grad = is_padding_d?default_channel_grad:(im_grad_d_ptr + f_c);
                   if(dynamic_default || (!is_padding_d)){
