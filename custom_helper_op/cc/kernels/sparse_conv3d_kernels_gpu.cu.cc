@@ -62,6 +62,8 @@ namespace functor {
               base_plane_data
 
 
+#define CHECK_PADDING(a, b) (static_cast<unsigned int>(a) >= static_cast<unsigned int>(b))
+
 // Explicit instantiation of the GPU functor.
 typedef Eigen::GpuDevice GPUDevice;
 // _Pragma("unroll") 
@@ -121,59 +123,38 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
       out_channels[o_c] = 0.;
     }
     
+
     _Pragma("unroll")  for(int f_h = 0; f_h < filter_h; f_h++){
       const auto im_h = image_start_h + f_h*dilations_h;
       const auto f_h_ptr = &filter_data[f_h*filter_height_step];
-      if((im_h >= 0) && (im_h < image_height)){
-        /* 1. valid height pixel */
-        const auto im_h_ptr = &image_batch_ptr[im_h*image_height_step];
-        const auto base_plane_h_ptr = &base_plane_batch_ptr[im_h*image_width];
-        _Pragma("unroll")   for(int f_w = 0; f_w < filter_w; f_w++){
-          const auto im_w = image_start_w + f_w*dilations_w;
-          const auto f_w_ptr = &f_h_ptr[f_w*filter_width_step];
-          if((im_w >= 0) && (im_w < image_width)){
-            /* 2. valid width pixel */
-            const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
-            const auto base_delta_d = image_start_d + base_plane_data[depth_map_pos] - base_plane_h_ptr[im_w];
-            _Pragma("unroll")   for(int f_d = 0; f_d < filter_d; f_d++){
-              const auto im_d = base_delta_d + f_d * dilations_d;
-              const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
-              if((im_d >= 0) && (im_d < image_depth)){
-                /* 3. valid depth pixel */
-                const auto im_d_ptr = &im_w_ptr[im_d*image_channels];
-                for(int f_c = 0; f_c < image_channels; f_c++){
-                  const auto f_o_ptr = &f_d_ptr[f_c*out_channel_num];
-                  for(int o_c = 0; o_c < out_channel_num; o_c++){
-                    /* output channel loop */
-                    out_channels[o_c] += f_o_ptr[o_c]*im_d_ptr[f_c];
-                  }
-                }
-              } else {
-                /* 3. empty depth pixel */
-                for(int32 f_pos = 0; f_pos < filter_depth_step; f_pos = f_pos + out_channel_num){
-                  const auto f_o_ptr = &f_d_ptr[f_pos];
-                  for(int o_c = 0; o_c < out_channel_num; o_c++){
-                    out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-                  }
-                }
-              }
+
+      const bool is_padding_h = CHECK_PADDING(im_h, image_height);
+
+      /* 1. valid height pixel */
+      const auto im_h_ptr = &image_batch_ptr[im_h*image_height_step];
+      const auto base_plane_h_ptr = &base_plane_batch_ptr[im_h*image_width];
+      _Pragma("unroll")   for(int f_w = 0; f_w < filter_w; f_w++){
+        const auto im_w = image_start_w + f_w*dilations_w;
+        const auto f_w_ptr = &f_h_ptr[f_w*filter_width_step];
+        const bool is_padding_w = is_padding_h || CHECK_PADDING(im_w, image_width);
+
+        /* 2. valid width pixel */
+        const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
+        const auto base_delta_d = image_start_d + base_plane_data[depth_map_pos] - base_plane_h_ptr[im_w];
+        _Pragma("unroll")   for(int f_d = 0; f_d < filter_d; f_d++){
+          const auto im_d = base_delta_d + f_d * dilations_d;
+          const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
+          const bool is_padding_d = is_padding_w || CHECK_PADDING(im_d, image_depth);
+
+          /* 3. valid depth pixel */
+          const auto im_d_ptr = &im_w_ptr[im_d*image_channels];
+          for(int f_c = 0; f_c < image_channels; f_c++){
+            const auto f_o_ptr = &f_d_ptr[f_c*out_channel_num];
+            for(int o_c = 0; o_c < out_channel_num; o_c++){
+              /* output channel loop */
+              const auto in_data = is_padding_d?__ldg(default_channel_value):__ldg(im_d_ptr + f_c);
+              out_channels[o_c] += f_o_ptr[o_c]*in_data;
             }
-          } else {
-            /* 2. empty width pixel */
-            for(int32 f_pos = 0; f_pos < filter_width_step; f_pos = f_pos + out_channel_num){
-              const auto f_o_ptr = &f_w_ptr[f_pos];
-              for(int o_c = 0; o_c < out_channel_num; o_c++){
-                out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-              }
-            }
-          }
-        }
-      } else {
-        /* 1. empty height pixel */
-        for(int32 f_pos = 0; f_pos < filter_height_step; f_pos = f_pos + out_channel_num){
-          const auto f_o_ptr = &f_h_ptr[f_pos];
-          for(int o_c = 0; o_c < out_channel_num; o_c++){
-            out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
           }
         }
       }
@@ -196,6 +177,7 @@ void SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LI
     SparseConv3DKernel<T, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(SPARSE_CONV3D_KERNEL_ARG_LIST);  
   } else {
     auto config = GetGpuLaunchConfig(loop_count, d, SparseConv3DKernel<T, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
+    // std::cout << "1# " << config.block_count << " " << config.thread_per_block << std::endl;
     SparseConv3DKernel<T, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, d.stream()>>>(SPARSE_CONV3D_KERNEL_ARG_LIST);  
   }
 
@@ -285,16 +267,13 @@ __global__ void SparseConv3DGradKernel(const int32 count,
     // }
     const auto out_grad_channel = &out_grad_data[i*out_channel_num];
 
-    T default_value_grad_tmp;
-    if(dynamic_default){
-      default_value_grad_tmp = T(0.);
-    }
 
     _Pragma("unroll")  for(int f_h = 0; f_h < filter_h; f_h++){
       const auto im_h = image_start_h + f_h*dilations_h;
       const auto f_h_ptr = &filter_data[f_h*filter_height_step];
       const auto f_grad_h_ptr = &filter_grad_data[f_h*filter_height_step];
-      if((im_h >= 0) && (im_h < image_height)){
+      const bool is_padding_h = CHECK_PADDING(im_h, image_height);
+
         /* 1. valid height pixel */
         const auto im_h_ptr = &image_batch_ptr[im_h*image_height_step];
         const auto im_grad_h_ptr = &image_grad_batch_ptr[im_h*image_height_step];
@@ -303,7 +282,8 @@ __global__ void SparseConv3DGradKernel(const int32 count,
           const auto im_w = image_start_w + f_w*dilations_w;
           const auto f_w_ptr = &f_h_ptr[f_w*filter_width_step];
           const auto f_grad_w_ptr = &f_grad_h_ptr[f_w*filter_width_step];
-          if((im_w >= 0) && (im_w < image_width)){
+          const bool is_padding_w = is_padding_h || CHECK_PADDING(im_w, image_width);
+
             /* 2. valid width pixel */
             const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
             const auto im_grad_w_ptr = &im_grad_h_ptr[im_w*image_width_step];
@@ -312,7 +292,8 @@ __global__ void SparseConv3DGradKernel(const int32 count,
               const auto im_d = base_delta_d + f_d*dilations_d;
               const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
               const auto f_grad_d_ptr = &f_grad_w_ptr[f_d*filter_depth_step];
-              if((im_d >= 0) && (im_d < image_depth)){
+              const bool is_padding_d = is_padding_w || CHECK_PADDING(im_d, image_depth);
+
                 /* 3. valid depth pixel */
                 const auto im_d_ptr = &im_w_ptr[im_d*image_channels];
                 const auto im_grad_d_ptr = &im_grad_w_ptr[im_d*image_channels];
@@ -322,60 +303,17 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                   T tmp = T(0);
                   for(int o_c = 0; o_c < out_channel_num; o_c++){
                     /* output channel loop */
-                    GpuAtomicAdd(&f_grad_o_ptr[o_c], im_d_ptr[f_c]*out_grad_channel[o_c]);
+                    const auto in_data = is_padding_d?__ldg(default_channel_value):__ldg(im_d_ptr + f_c);
+                    GpuAtomicAdd(&f_grad_o_ptr[o_c], in_data*out_grad_channel[o_c]);
                     tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
                   }
-                  GpuAtomicAdd(&im_grad_d_ptr[f_c], tmp);
-                }
-              } else {
-                /* 3. empty depth pixel */
-                for(int32 f_pos = 0; f_pos < filter_depth_step; f_pos = f_pos + out_channel_num){
-                  const auto f_o_ptr = &f_d_ptr[f_pos];
-                  const auto f_grad_o_ptr = &f_grad_d_ptr[f_pos];
-                  for(int o_c = 0; o_c < out_channel_num; o_c++){
-                    // out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-                    GpuAtomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
-                    if(dynamic_default){
-                      default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
-                    }
+                  const auto in_grad = is_padding_d?default_channel_grad:(im_grad_d_ptr + f_c);
+                  if(dynamic_default || (!is_padding_d)){
+                    GpuAtomicAdd(in_grad, tmp);
                   }
                 }
-              }
             }
-          } else {
-            /* 2. empty width pixel */
-            for(int32 f_pos = 0; f_pos < filter_width_step; f_pos = f_pos + out_channel_num){
-              const auto f_o_ptr = &f_w_ptr[f_pos];
-              const auto f_grad_o_ptr = &f_grad_w_ptr[f_pos];
-              for(int o_c = 0; o_c < out_channel_num; o_c++){
-                // out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-                GpuAtomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
-                if(dynamic_default){
-                  default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
-                }
-              }
-            }
-          }
         }
-      } else {
-        /* 1. empty height pixel */
-        for(int32 f_pos = 0; f_pos < filter_height_step; f_pos = f_pos + out_channel_num){
-          const auto f_o_ptr = &f_h_ptr[f_pos];
-          const auto f_grad_o_ptr = &f_grad_h_ptr[f_pos];
-          for(int o_c = 0; o_c < out_channel_num; o_c++){
-            // out_channels[o_c] += default_channel_value[0]*f_o_ptr[o_c];
-            GpuAtomicAdd(&f_grad_o_ptr[o_c], default_channel_value[0]*out_grad_channel[o_c]);
-            if(dynamic_default){
-              default_value_grad_tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
-            }
-          }
-        }
-      }
-    }
-    if(dynamic_default){
-      if(default_value_grad_tmp > T(0.)){
-        GpuAtomicAdd(&default_channel_grad[0], default_value_grad_tmp);
-      }
     }
   }
 }
