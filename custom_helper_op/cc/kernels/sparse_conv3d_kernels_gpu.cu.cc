@@ -7,6 +7,7 @@
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 #include "custom_helper_op/cc/kernels/sparse_conv.h"
+#include <cub/cub.cuh>
 
 namespace tensorflow {
 namespace custom_helper_op {
@@ -108,7 +109,7 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
       depth_map_pos = (b*image_height+h)*image_width+w;
     }
 
-    d = d + ((base_plane_data[depth_map_pos] + stride_d - 1)/stride_d)*stride_d - base_plane_data[depth_map_pos];
+    d = d + ((__ldg(base_plane_data + depth_map_pos) + stride_d - 1)/stride_d)*stride_d - __ldg(base_plane_data + depth_map_pos);
 
     const auto image_start_h = h - (filter_h/2)*dilations_h;
     const auto image_start_w = w - (filter_w/2)*dilations_w;
@@ -122,7 +123,6 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
     for(int o_c = 0; o_c < out_channel_num; o_c++){
       out_channels[o_c] = 0.;
     }
-    
 
     _Pragma("unroll")  for(int f_h = 0; f_h < filter_h; f_h++){
       const auto im_h = image_start_h + f_h*dilations_h;
@@ -140,7 +140,7 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
 
         /* 2. valid width pixel */
         const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
-        const auto base_delta_d = image_start_d + base_plane_data[depth_map_pos] - base_plane_h_ptr[im_w];
+        const auto base_delta_d = image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
         _Pragma("unroll")   for(int f_d = 0; f_d < filter_d; f_d++){
           const auto im_d = base_delta_d + f_d * dilations_d;
           const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
@@ -208,7 +208,7 @@ SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
 
 #undef SPARSE_CONV3D_DEFINE_INSTANCE
 
-template <typename T, bool dynamic_default, typename INDEX_TYPE, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
+template <typename T, bool dynamic_default, int BLOCK_THREADS, typename INDEX_TYPE, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
 __global__ void SparseConv3DGradKernel(const int32 count,
               SPARSE_CONV3D_KERNEL_BASE_ARG_DEF_LIST,
               const T * out_grad_data,
@@ -217,6 +217,17 @@ __global__ void SparseConv3DGradKernel(const int32 count,
               T* default_channel_grad) {
   // GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char , shared_memory);
   // T* const shared_data = reinterpret_cast<T*>(shared_memory);
+
+  // Specialize BlockReduce type for our thread block
+  typedef cub::BlockReduce<T, BLOCK_THREADS> BlockReduceT;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+
+  // // Specialize WarpReduce for type int
+  // typedef cub::WarpReduce<T> WarpReduce;
+  // // Allocate WarpReduce shared memory for 4 warps
+  // __shared__ typename WarpReduce::TempStorage temp_storage[BLOCK_THREADS/32];
+
   const int filter_h = kKnownFilterHeight < 0 ? filter_h_arg: kKnownFilterHeight;
   const int filter_w = kKnownFilterWidth < 0 ? filter_w_arg: kKnownFilterWidth;
   const int filter_d = kKnownFilterDepth < 0 ? filter_d_arg: kKnownFilterDepth;
@@ -233,7 +244,10 @@ __global__ void SparseConv3DGradKernel(const int32 count,
   const auto filter_depth_step = image_channels*out_channel_num;
   const auto filter_width_step = filter_d*filter_depth_step;
   const auto filter_height_step = filter_w*filter_width_step;
-  for (const auto i : GpuGridRangeX<INDEX_TYPE>(count)) {
+  for (INDEX_TYPE i = blockIdx.x * blockDim.x + threadIdx.x;; i += gridDim.x * blockDim.x) {
+    if(i >= ((count + BLOCK_THREADS - 1)/BLOCK_THREADS)*BLOCK_THREADS){
+      break;
+    }
     int32 d = i%out_depth;
     INDEX_TYPE depth_map_pos = i/out_depth;
  
@@ -260,11 +274,6 @@ __global__ void SparseConv3DGradKernel(const int32 count,
     const auto image_grad_batch_ptr = &images_grad_data[b*image_batch_step];
     const auto base_plane_batch_ptr = &base_plane_data[b*image_height*image_width];
 
-    // auto out_channels = &out_data[i*out_channel_num];
-
-    // for(int o_c = 0; o_c < out_channel_num; o_c++){
-    //   out_channels[o_c] = 0.;
-    // }
     const auto out_grad_channel = &out_grad_data[i*out_channel_num];
 
 
@@ -303,9 +312,29 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                   T tmp = T(0);
                   for(int o_c = 0; o_c < out_channel_num; o_c++){
                     /* output channel loop */
-                    const auto in_data = is_padding_d?__ldg(default_channel_value):__ldg(im_d_ptr + f_c);
-                    GpuAtomicAdd(&f_grad_o_ptr[o_c], in_data*out_grad_channel[o_c]);
-                    tmp += f_o_ptr[o_c]*out_grad_channel[o_c];
+                    T in_data = 0.;
+                    if(i < count){
+                      in_data = is_padding_d?__ldg(default_channel_value):__ldg(im_d_ptr + f_c);
+                      in_data = in_data *__ldg(out_grad_channel + o_c);
+                      tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
+                    }
+
+                    const auto aggregate = BlockReduceT(temp_storage).Sum(in_data);
+                    //__syncthreads(); //A subsequent __syncthreads() threadblock barrier should be invoked after calling this method if the collective's temporary storage (e.g., temp_storage) is to be reused or repurposed
+                    if (threadIdx.x == 0){
+                      GpuAtomicAdd(&f_grad_o_ptr[o_c], aggregate);
+                    }
+                    // T in_data = 0.;
+                    // if(i < count){
+                    //   in_data = is_padding_d?__ldg(default_channel_value):__ldg(im_d_ptr + f_c);
+                    //   in_data = in_data*__ldg(out_grad_channel + o_c);
+                    //   tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
+                    // }
+                    // int warp_id = threadIdx.x / 32;
+                    // T aggregate = WarpReduce(temp_storage[warp_id]).Sum(in_data);
+                    // if((threadIdx.x % 32) == 0){
+                    //   GpuAtomicAdd(&f_grad_o_ptr[o_c], aggregate);
+                    // }
                   }
                   const auto in_grad = is_padding_d?default_channel_grad:(im_grad_d_ptr + f_c);
                   if(dynamic_default || (!is_padding_d)){
@@ -397,8 +426,10 @@ void SparseConv3DGradFunctor<Eigen::GpuDevice, T, dynamic_default, SPARSE_CONV3D
       SetZeroBig<T, int64><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(1, default_channel_value_grad);
     }
 
-    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, dynamic_default, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
-    SparseConv3DGradKernel<T, dynamic_default, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST);  
+    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, dynamic_default, 256, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
+    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DGradKernel<T, dynamic_default, 256, int64, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, config.block_count, 
+                                256, 0, dev.stream(),   
+                                SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST));
   } else {
     auto config = GetGpuLaunchConfigBig(images_size, dev, SetZeroBig<T, int32>, 0, 0);
     SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(images_size, images_grad_data);
@@ -409,8 +440,10 @@ void SparseConv3DGradFunctor<Eigen::GpuDevice, T, dynamic_default, SPARSE_CONV3D
       SetZeroBig<T, int32><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(1, default_channel_value_grad);
     }
 
-    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, dynamic_default, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0);
-    SparseConv3DGradKernel<T, dynamic_default, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST><<<config.block_count, config.thread_per_block, 0, dev.stream()>>>(SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST);  
+    config = GetGpuLaunchConfig(loop_count, dev, SparseConv3DGradKernel<T, dynamic_default, 256, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, 0, 0); 
+    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DGradKernel<T, dynamic_default, 256, int32, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST>, config.block_count, 
+                                256, 0, dev.stream(),   
+                                SPARSE_CONV3D_KERNEL_GRAD_ARG_LIST));                  
   }
 }
 

@@ -99,7 +99,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     @parameterized.parameters(
       (1, 128, 160, 16, 32, 4, 3, (3, 3, 3), (1, 1, 1)),
       (2, 128, 160, 16, 48, 5, 6, (5, 3, 3), (1, 1, 1)),
-      (2, 128, 160, 16, 48, 5, 6, (3, 3, 3), (2, 2, 2)),
+      (2, 32, 40, 16, 48, 90, 100, (3, 3, 3), (2, 2, 2)),
     )
     def testForward(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
         images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
