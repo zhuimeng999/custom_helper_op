@@ -256,15 +256,19 @@ __global__ void SparseConv3DGradKernel(const int32 count,
 
     int32 h = tmp%out_height;
     const int32 b = tmp/out_height;
-    d = d*stride_d;
-    w = w*stride_w;
-    h = h*stride_h;
+    if(i < count){
+      d = d*stride_d;
+      w = w*stride_w;
+      h = h*stride_h;
 
-    if((kKnownStrideHeight != 1) || (kKnownStrideWidth != 1)){
-      depth_map_pos = (b*image_height+h)*image_width+w;
+      if((kKnownStrideHeight != 1) || (kKnownStrideWidth != 1)){
+        depth_map_pos = (b*image_height+h)*image_width+w;
+      }
+
+      d = d + ((base_plane_data[depth_map_pos] + stride_d - 1)/stride_d)*stride_d - base_plane_data[depth_map_pos];
+    } else {
+      depth_map_pos = d = w = h = 0;
     }
-
-    d = d + ((base_plane_data[depth_map_pos] + stride_d - 1)/stride_d)*stride_d - base_plane_data[depth_map_pos];
 
     const auto image_start_h = h - (filter_h/2)*dilations_h;
     const auto image_start_w = w - (filter_w/2)*dilations_w;
