@@ -140,7 +140,7 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
 
         /* 2. valid width pixel */
         const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
-        const auto base_delta_d = image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
+        const auto base_delta_d = is_padding_w?0:image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
         _Pragma("unroll")   for(int f_d = 0; f_d < filter_d; f_d++){
           const auto im_d = base_delta_d + f_d * dilations_d;
           const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
@@ -296,7 +296,7 @@ __global__ void SparseConv3DGradKernel(const int32 count,
             /* 2. valid width pixel */
             const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
             const auto im_grad_w_ptr = &im_grad_h_ptr[im_w*image_width_step];
-            const auto base_delta_d = image_start_d + base_plane_data[depth_map_pos] - base_plane_h_ptr[im_w];
+            const auto base_delta_d = is_padding_w?0:image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
             _Pragma("unroll")   for(int f_d = 0; f_d < filter_d; f_d++){
               const auto im_d = base_delta_d + f_d*dilations_d;
               const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
@@ -312,13 +312,7 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                   T tmp = T(0);
                   for(int o_c = 0; o_c < out_channel_num; o_c++){
                     // /* output channel loop */
-                    T in_data = 0.;
-                    if(is_padding_d){
-                      in_data = __ldg(default_channel_value);
-                    } else {
-                      in_data = __ldg(im_d_ptr + f_c);
-                    }
-
+                    T in_data = is_padding_d?__ldg(default_channel_value):__ldg(im_d_ptr + f_c);
                     in_data = in_data *__ldg(out_grad_channel + o_c);
                     tmp += __ldg(f_o_ptr + o_c)*__ldg(out_grad_channel + o_c);
 
