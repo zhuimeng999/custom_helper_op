@@ -78,6 +78,9 @@ custom_op_library(
         "cc/kernels/index_initializer.h",
         "cc/kernels/index_initializer_kernels_gpu.cu.cc",
     ],
+    cuda_deps = [
+        "@cub_archive//:cub",
+    ],
 )
 
 py_library(

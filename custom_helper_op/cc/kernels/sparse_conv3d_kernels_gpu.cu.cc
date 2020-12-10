@@ -7,7 +7,7 @@
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 #include "custom_helper_op/cc/kernels/sparse_conv.h"
-#include <cub/cub.cuh>
+#include "gpu/cub/device/device_reduce.cuh"
 
 namespace tensorflow {
 namespace custom_helper_op {
