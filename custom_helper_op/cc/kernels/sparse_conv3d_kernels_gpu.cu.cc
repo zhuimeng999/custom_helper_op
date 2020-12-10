@@ -203,7 +203,7 @@ void SparseConv3DFunctor<Eigen::GpuDevice, T, SPARSE_CONV3D_FIX_PARAMETOR_ARG_LI
 //                       SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 1, 1, 1) \
 //                       SPARSE_CONV3D_DEFINE_INSTANCE_WITH_DILATIONS(instance_type, 2, 2, 2)
 
-SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double);
+SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(float);
 // SPARSE_CONV3D_DEFINE_INSTANCE_WITH_TYPE(double); 
 
 #undef SPARSE_CONV3D_DEFINE_INSTANCE
@@ -326,7 +326,7 @@ __global__ void SparseConv3DGradKernel(const int32 count,
                     if(num_threads >= BLOCK_THREADS){
                       num_threads = BLOCK_THREADS;
                     }
-                    
+
                     const auto aggregate = BlockReduceT(temp_storage).Sum(in_data, num_threads);
 
                     //__syncthreads(); //A subsequent __syncthreads() threadblock barrier should be invoked after calling this method if the collective's temporary storage (e.g., temp_storage) is to be reused or repurposed
@@ -470,7 +470,7 @@ void SparseConv3DGradFunctor<Eigen::GpuDevice, T, dynamic_default, SPARSE_CONV3D
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, 3, 3, 3, 1, 1, 1, 2, 2, 1>; \
                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, -1, -1, -1, -1, -1, -1, -1, -1, -1>;
 
-SPARSE_CONV3D_GRAD_DEFINE_INSTANCE_WITH_TYPE(double);
+SPARSE_CONV3D_GRAD_DEFINE_INSTANCE_WITH_TYPE(float);
 // #define SPARSE_CONV3D_DEFINE_INSTANCE(instance_type, f_h, f_w, f_d, d_h, d_w, d_d) \
 //                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, true, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>; \
 //                 template struct SparseConv3DGradFunctor<GPUDevice, instance_type, false, f_h, f_w, f_d, d_h, d_w, d_d, -1, -1, -1>;
