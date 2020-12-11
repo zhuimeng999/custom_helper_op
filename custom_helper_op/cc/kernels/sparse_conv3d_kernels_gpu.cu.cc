@@ -111,9 +111,9 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
 
     d = d + ((__ldg(base_plane_data + depth_map_pos) + stride_d - 1)/stride_d)*stride_d - __ldg(base_plane_data + depth_map_pos);
 
-    const auto image_start_h = h - (filter_h/2)*dilations_h;
-    const auto image_start_w = w - (filter_w/2)*dilations_w;
-    const auto image_start_d = d - (filter_d/2)*dilations_d;
+    const int32 image_start_h = h - (filter_h/2)*dilations_h;
+    const int32 image_start_w = w - (filter_w/2)*dilations_w;
+    const int32 image_start_d = d - (filter_d/2)*dilations_d;
 
     const auto image_batch_ptr = &images_data[b*image_batch_step];
     const auto base_plane_batch_ptr = &base_plane_data[b*image_height*image_width];
@@ -125,7 +125,7 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
     }
 
     _Pragma("unroll")  for(int f_h = 0; f_h < filter_h; f_h++){
-      const auto im_h = image_start_h + f_h*dilations_h;
+      const int32 im_h = image_start_h + f_h*dilations_h;
       const auto f_h_ptr = &filter_data[f_h*filter_height_step];
 
       const bool is_padding_h = CHECK_PADDING(im_h, image_height);
@@ -134,15 +134,15 @@ __global__ void SparseConv3DKernel(const INDEX_TYPE count, SPARSE_CONV3D_KERNEL_
       const auto im_h_ptr = &image_batch_ptr[im_h*image_height_step];
       const auto base_plane_h_ptr = &base_plane_batch_ptr[im_h*image_width];
       _Pragma("unroll")   for(int f_w = 0; f_w < filter_w; f_w++){
-        const auto im_w = image_start_w + f_w*dilations_w;
+        const int32 im_w = image_start_w + f_w*dilations_w;
         const auto f_w_ptr = &f_h_ptr[f_w*filter_width_step];
         const bool is_padding_w = is_padding_h || CHECK_PADDING(im_w, image_width);
 
         /* 2. valid width pixel */
         const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
-        const auto base_delta_d = is_padding_w?0:image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
+        const int32 base_delta_d = is_padding_w?0:image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
         _Pragma("unroll")   for(int f_d = 0; f_d < filter_d; f_d++){
-          const auto im_d = base_delta_d + f_d * dilations_d;
+          const int32 im_d = base_delta_d + f_d * dilations_d;
           const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
           const bool is_padding_d = is_padding_w || CHECK_PADDING(im_d, image_depth);
 
@@ -266,9 +266,9 @@ __global__ void SparseConv3DGradKernel(const int32 count,
     d = d + ((__ldg(base_plane_data + depth_map_pos) + stride_d - 1)/stride_d)*stride_d - __ldg(base_plane_data + depth_map_pos);
 
 
-    const auto image_start_h = h - (filter_h/2)*dilations_h;
-    const auto image_start_w = w - (filter_w/2)*dilations_w;
-    const auto image_start_d = d - (filter_d/2)*dilations_d;
+    const int32 image_start_h = h - (filter_h/2)*dilations_h;
+    const int32 image_start_w = w - (filter_w/2)*dilations_w;
+    const int32 image_start_d = d - (filter_d/2)*dilations_d;
 
     const auto image_batch_ptr = &images_data[b*image_batch_step];
     const auto image_grad_batch_ptr = &images_grad_data[b*image_batch_step];
@@ -278,7 +278,7 @@ __global__ void SparseConv3DGradKernel(const int32 count,
 
 
     _Pragma("unroll")  for(int f_h = 0; f_h < filter_h; f_h++){
-      const auto im_h = image_start_h + f_h*dilations_h;
+      const int32 im_h = image_start_h + f_h*dilations_h;
       const auto f_h_ptr = &filter_data[f_h*filter_height_step];
       const auto f_grad_h_ptr = &filter_grad_data[f_h*filter_height_step];
       const bool is_padding_h = CHECK_PADDING(im_h, image_height);
@@ -288,7 +288,7 @@ __global__ void SparseConv3DGradKernel(const int32 count,
         const auto im_grad_h_ptr = &image_grad_batch_ptr[im_h*image_height_step];
         const auto base_plane_h_ptr = &base_plane_batch_ptr[im_h*image_width];
         _Pragma("unroll")   for(int f_w = 0; f_w < filter_w; f_w++){
-          const auto im_w = image_start_w + f_w*dilations_w;
+          const int32 im_w = image_start_w + f_w*dilations_w;
           const auto f_w_ptr = &f_h_ptr[f_w*filter_width_step];
           const auto f_grad_w_ptr = &f_grad_h_ptr[f_w*filter_width_step];
           const bool is_padding_w = is_padding_h || CHECK_PADDING(im_w, image_width);
@@ -296,9 +296,9 @@ __global__ void SparseConv3DGradKernel(const int32 count,
             /* 2. valid width pixel */
             const auto im_w_ptr = &im_h_ptr[im_w*image_width_step];
             const auto im_grad_w_ptr = &im_grad_h_ptr[im_w*image_width_step];
-            const auto base_delta_d = is_padding_w?0:image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
+            const int32 base_delta_d = is_padding_w?0:image_start_d + __ldg(base_plane_data + depth_map_pos) - __ldg(base_plane_h_ptr + im_w);
             _Pragma("unroll")   for(int f_d = 0; f_d < filter_d; f_d++){
-              const auto im_d = base_delta_d + f_d*dilations_d;
+              const int32 im_d = base_delta_d + f_d*dilations_d;
               const auto f_d_ptr = &f_w_ptr[f_d*filter_depth_step];
               const auto f_grad_d_ptr = &f_grad_w_ptr[f_d*filter_depth_step];
               const bool is_padding_d = is_padding_w || CHECK_PADDING(im_d, image_depth);
