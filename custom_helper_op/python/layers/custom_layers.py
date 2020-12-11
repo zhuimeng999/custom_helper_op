@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 import tensorflow as tf
-from custom_helper_op.python.ops.custom_helper_ops import index_initializer, cost_aggregate, sparse_pad, sparse_conv3d, cost_volume, cost_volume_v2
+from custom_helper_op.python.ops.custom_helper_ops import index_initializer, cost_aggregate, sparse_pad, sparse_conv3d, sparse_conv3d_fast, cost_volume, cost_volume_v2
 from tensorflow_addons.image import resampler
 
 class DepthProjectLayer(tf.keras.layers.Layer):
@@ -118,7 +118,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
         
         dynamic_default = self.default_value.trainable
             
-        out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
+        out = sparse_conv3d_fast(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
         if self.use_bias:
             out =  tf.nn.bias_add(out, self.bias)
         return out
