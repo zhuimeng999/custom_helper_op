@@ -188,6 +188,7 @@ class SparseConv3DFastOp : public SparseConv3DFastOpBase<Device, T> {
                                           default_channels_value.flat<T>().data(),
                                           base_plane.tensor<int32, 4>().data(),
                                           output->tensor<T, 5>().data());
+
   }
 private:
   TF_DISALLOW_COPY_AND_ASSIGN(SparseConv3DFastOp);

@@ -42,23 +42,21 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
 
     int32 depth   = tmp   % p.output_depths;
     tmp = tmp   / p.output_depths;
- 
+
     int32 col   = tmp % p.output_cols;
     tmp       = tmp / p.output_cols;
 
     int32 row   = tmp % p.output_rows;
     const int32 b   = tmp / p.output_rows;
 
-    depth = depth * p.stride_depths;
     col = col * p.stride_cols;
     row = row * p.stride_rows;
-    
-    const int32 depth_map_pos = (b * p.input_rows + row) * p.input_cols + col;
 
-    int32 base_depth = __ldg(base_plane_data + depth_map_pos);
-  
-    depth = depth + ((base_depth + p.stride_depths - 1)/p.stride_depths)*p.stride_depths 
-                    - base_depth;
+    depth = (depth + ((__ldg(base_plane_data + (b * p.input_rows + row) * p.input_cols + col) + p.stride_depths - 1)/p.stride_depths))*p.stride_depths;
+
+    row = row - p.padding_rows;
+    col = col - p.padding_cols;
+    depth = depth - p.padding_depths;
 
     T partial_sum = T(0.);
     for(int j = threadIdx.x%CUB_PTX_WARP_THREADS; j < kernel_step; j += CUB_PTX_WARP_THREADS){
@@ -69,15 +67,14 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
       int32 f_col = f_tmp % p.filter_cols;
       int32 f_row = f_tmp/p.filter_cols;
 
-      int32 in_tmp = row + f_row*p.dilation_rows - p.padding_rows;
+      int32 in_tmp = row + f_row*p.dilation_rows ;
       bool is_padding = CHECK_PADDING(in_tmp, p.input_rows);
       int64 image_index = b * p.input_rows + in_tmp;
-      in_tmp = col + f_col*p.dilation_cols - p.padding_cols;
+      in_tmp = col + f_col*p.dilation_cols;
       is_padding |= CHECK_PADDING(in_tmp, p.input_cols);
       image_index = image_index * p.input_cols + in_tmp;
       if(!is_padding){
-        in_tmp = depth + f_depth*p.dilation_depths - p.padding_depths +
-                                      base_depth - __ldg(base_plane_data + image_index);
+        in_tmp = depth + f_depth*p.dilation_depths - __ldg(base_plane_data + image_index);
         is_padding = CHECK_PADDING(in_tmp, p.input_depths);
         image_index = image_index * p.input_depths + in_tmp;
       }
@@ -95,8 +92,6 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
   }
 }
 
-#define SPARSE_CONV3D_KERNEL_ARG_LIST loop_count, SPARSE_CONV3D_KERNEL_BASE_ARG_LIST, out_data
-
 template <typename T>
 void SparseConv3DFastFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p, 
                                                const T* images_data, 
@@ -105,8 +100,6 @@ void SparseConv3DFastFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDe
                                                 const int32* base_plane_data,
                                                 T * out_data)
 {
-  int64 loop_count = static_cast<int64>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
-  
   int block_count = 0;
   int thread_per_block = 1024;
   cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -125,8 +118,10 @@ void SparseConv3DFastFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDe
   CHECK_EQ(err, cudaSuccess);
   CHECK_GT(block_count, 0);
   
-  block_count = std::min(static_cast<int64>(d.getNumGpuMultiProcessors() * block_count), 
-                                                          (loop_count + (thread_per_block/CUB_PTX_WARP_THREADS))/(thread_per_block/CUB_PTX_WARP_THREADS));
+  int64 loop_count = static_cast<int64>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
+  int valid_sample_per_block = thread_per_block/CUB_PTX_WARP_THREADS;
+  int64 expect_total_block_count = (loop_count + valid_sample_per_block - 1)/valid_sample_per_block;
+  block_count = std::min(static_cast<int64>(d.getNumGpuMultiProcessors() * block_count), expect_total_block_count);
 
   int kernel_step = p.filter_rows * p.filter_cols * p.filter_depths * p.input_channels;
   switch (thread_per_block)
@@ -171,16 +166,16 @@ __global__ void SparseConv3DFastGradKernel(const SparseConv3DFastParams p, const
 
     int32 depth   = tmp % p.input_depths;
     tmp = tmp   / p.input_depths;
- 
+
     int32 col   = tmp % p.input_cols;
     tmp       = tmp / p.input_cols;
 
     int32 row   = tmp % p.input_rows;
     const int32 b   = tmp / p.input_rows;
-    
-    const int32 depth_map_pos = (b * p.input_rows + row) * p.input_cols + col;
 
-    int32 base_depth = __ldg(base_plane_data + depth_map_pos);
+    depth = depth + __ldg(base_plane_data + (b * p.input_rows + row) * p.input_cols + col) + p.padding_depths;
+    row = row + p.padding_rows;
+    col = col + p.padding_cols;
 
     T partial_sum = T(0.);
     for(int j = threadIdx.x%CUB_PTX_WARP_THREADS; j < kernel_step; j += CUB_PTX_WARP_THREADS){
@@ -191,16 +186,25 @@ __global__ void SparseConv3DFastGradKernel(const SparseConv3DFastParams p, const
       int32 f_col = f_tmp % p.filter_cols;
       int32 f_row = f_tmp/p.filter_cols;
 
-      int32 in_tmp = row - f_row*p.dilation_rows + p.padding_rows;
-      bool is_padding = CHECK_PADDING(in_tmp, p.output_rows);
+      int32 in_tmp = row - f_row*p.dilation_rows;
+      int32 base_plane_index = b * p.input_rows + in_tmp;
+      bool is_padding = (in_tmp%p.stride_rows != 0);
+      in_tmp = in_tmp/p.stride_rows;
+      is_padding = is_padding || CHECK_PADDING(in_tmp, p.output_rows);
       int64 image_index = b * p.output_rows + in_tmp;
-      in_tmp = col - f_col*p.dilation_cols + p.padding_cols;
+
+      in_tmp = col - f_col*p.dilation_cols;
+      base_plane_index = base_plane_index * p.input_cols + in_tmp;
+      is_padding |= (in_tmp%p.stride_cols != 0);
+      in_tmp = in_tmp/p.stride_cols;
       is_padding |= CHECK_PADDING(in_tmp, p.output_cols);
       image_index = image_index * p.output_cols + in_tmp;
       if(!is_padding){
-        in_tmp = depth - f_depth*p.dilation_depths + p.padding_depths -
-                                      base_depth + __ldg(base_plane_data + image_index);
-        is_padding = CHECK_PADDING(in_tmp, p.output_depths);
+        /* check here to prevent out of memory error when read base_plane_data */
+        in_tmp = depth - f_depth*p.dilation_depths;
+        is_padding = (in_tmp%p.stride_depths != 0);
+        in_tmp = (in_tmp/p.stride_depths) - (__ldg(base_plane_data + base_plane_index) + p.stride_depths - 1)/p.stride_depths ;
+        is_padding |= CHECK_PADDING(in_tmp, p.output_depths);
         image_index = image_index * p.output_depths + in_tmp;
       }
       image_index = image_index * p.output_channels + out_ch;
@@ -217,6 +221,18 @@ __global__ void SparseConv3DFastGradKernel(const SparseConv3DFastParams p, const
   }
 }
 
+
+template <typename T>
+__global__ void SparseConv3DFastFilterGradKernel(const SparseConv3DFastParams p, const int64 count, const int kernel_step,
+                                                                                          const T* out_grad_data, 
+                                                                                          const T* filter_data, 
+                                                                                          const T* default_channel_value, 
+                                                                                          const int32* base_plane_data,
+                                                                                          T * filter_grad_data)
+{
+
+}
+#include <iostream>
 // Partially specialize functor for GpuDevice.
 template <typename T>
 void SparseConv3DFastGradFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p,
@@ -229,47 +245,57 @@ void SparseConv3DFastGradFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::G
                                                 T * filter_grad_data,
                                                 T * default_channel_value_grad)
 {
-  int64 loop_count = static_cast<int64>(p.input_batches)*p.input_rows*p.input_cols*p.input_depths*p.input_channels;
-  
   int block_count = 0;
   int thread_per_block = 1024;
   cudaError_t err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-      &block_count, SparseConv3DFastKernel<T, 1024>, 1024, 0);
+      &block_count, SparseConv3DFastGradKernel<T, 1024>, 1024, 0);
   if((err != cudaSuccess) || (block_count <= 0)){
     thread_per_block = 512;
     err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-      &block_count, SparseConv3DFastKernel<T, 512>, 512, 0);
+      &block_count, SparseConv3DFastGradKernel<T, 512>, 512, 0);
       
       if((err != cudaSuccess) || (block_count <= 0)){
         thread_per_block = 256;
         err = cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-          &block_count, SparseConv3DFastKernel<T, 256>, 256, 0);
+          &block_count, SparseConv3DFastGradKernel<T, 256>, 256, 0);
       }
   }
   CHECK_EQ(err, cudaSuccess);
   CHECK_GT(block_count, 0);
   
-  block_count = std::min(static_cast<int64>(d.getNumGpuMultiProcessors() * block_count), 
-                                                          (loop_count + (thread_per_block/CUB_PTX_WARP_THREADS))/(thread_per_block/CUB_PTX_WARP_THREADS));
+  int64 loop_count = static_cast<int64>(p.input_batches)*p.input_rows*p.input_cols*p.input_depths*p.input_channels;
+  int valid_sample_per_block = thread_per_block/CUB_PTX_WARP_THREADS;
+  int64 expect_total_block_count = (loop_count + valid_sample_per_block - 1)/valid_sample_per_block;
+  block_count = std::min(static_cast<int64>(d.getNumGpuMultiProcessors() * block_count), expect_total_block_count);
 
   int kernel_step = p.filter_rows * p.filter_cols * p.filter_depths * p.output_channels;
   switch (thread_per_block)
   {
   case 1024:
-    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T, 1024>, block_count, 
+    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastGradKernel<T, 1024>, block_count, 
                               1024, 0, d.stream(), p, loop_count, kernel_step, out_grad_data, filter_data, default_channel_value, base_plane_data, images_grad_data));
     break;
   case 512:
-    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T, 512>, block_count, 
+    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastGradKernel<T, 512>, block_count, 
                               512, 0, d.stream(), p, loop_count, kernel_step, out_grad_data, filter_data, default_channel_value, base_plane_data, images_grad_data));
   break;
   case 256:
-    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T, 256>, block_count, 
+    TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastGradKernel<T, 256>, block_count, 
                               256, 0, d.stream(), p, loop_count, kernel_step, out_grad_data, filter_data, default_channel_value, base_plane_data, images_grad_data));
     break;
   default:
     break;
   }
+
+  size_t smem_size = 10*10*4;
+  err = cudaOccupancyMaxPotentialBlockSize(&block_count, &thread_per_block, SparseConv3DFastFilterGradKernel<T>, smem_size);
+  CHECK_EQ(err, cudaSuccess);
+  CHECK_GT(block_count, 0);
+  std::cout << "1####### " << block_count << " " << thread_per_block << " " << smem_size << std::endl;
+  smem_size = 0;
+  err = cudaOccupancyAvailableDynamicSMemPerBlock(&smem_size, SparseConv3DFastFilterGradKernel<T>, block_count/d.getNumGpuMultiProcessors(), thread_per_block);
+  CHECK_EQ(err, cudaSuccess);
+  std::cout << "2####### " << block_count << " " << thread_per_block << " " << smem_size << " " << d.getNumGpuMultiProcessors()<< std::endl;
 };
 
 template struct SparseConv3DFastGradFunctor<Eigen::GpuDevice, float>;
