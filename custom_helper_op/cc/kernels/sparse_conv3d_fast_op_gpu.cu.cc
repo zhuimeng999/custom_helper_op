@@ -11,8 +11,11 @@
 
 namespace tensorflow {
 namespace custom_helper_op {
-namespace functor {
 
+template struct LaunchTransposeAndReverse<Eigen::GpuDevice, float, 5>;
+template struct LaunchTransposeAndReverse<Eigen::GpuDevice, double, 5>;
+
+namespace functor {
 #define CHECK_PADDING(a, b) (static_cast<unsigned int>(a) >= static_cast<unsigned int>(b))
 
 // Explicit instantiation of the GPU functor.
@@ -223,14 +226,55 @@ __global__ void SparseConv3DFastGradKernel(const SparseConv3DFastParams p, const
 
 
 template <typename T>
-__global__ void SparseConv3DFastFilterGradKernel(const SparseConv3DFastParams p, const int64 count, const int kernel_step,
-                                                                                          const T* out_grad_data, 
+__global__ void SparseConv3DFastFilterGradKernel(const SparseConv3DFastParams p, const int64 count, const int image_size,
+                                                                                          const T* image_cnhwd,
+                                                                                          const T* out_grad_data,                                                                                         
                                                                                           const T* filter_data, 
                                                                                           const T* default_channel_value, 
                                                                                           const int32* base_plane_data,
                                                                                           T * filter_grad_data)
 {
+  GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char, shared_memory);
 
+  T * shared_data = reinterpret_cast<T *>(shared_memory);
+
+  assert((blockDim.x % p.output_channels) == 0);
+  int out_ch = threadIdx.x%p.output_channels;
+  int d_offset = threadIdx.x/p.output_channels;
+  for(int i = blockIdx.x; i < count; i += gridDim.x){
+    int depth = i % p.filter_depths;
+    int col = i / p.filter_depths % p.filter_cols;
+    int row = i / p.filter_depths/ p.filter_cols % p.filter_rows;
+    int in_ch = i / p.filter_depths/ p.filter_cols /p.filter_rows;
+
+    int filter_grad_out_channel_ptr = (((row*p.filter_cols + col)*p.filter_depths + depth)*p.input_channels+in_ch)*p.output_channels;
+    depth = depth - p.padding_depths;
+    col = col - p.padding_cols;
+    row = row - p.padding_rows;
+
+    int image_index_offset = (row * p.input_cols+ col)*p.input_depths + depth;
+    T filter_grad = T(0.);
+    for(int j = threadIdx.x; j < image_size; j += d_offset){
+      int im_d = j % p.input_depths + depth;
+      int im_c = j / p.input_depths % p.input_cols + col;
+      int im_r = j / p.input_depths / p.input_cols % p.input_rows + row;
+      
+      if(CHECK_PADDING(im_r, p.input_rows) || CHECK_PADDING(im_c, p.input_cols) || CHECK_PADDING(im_d, p.input_depths)){
+
+      } else {
+        filter_grad += image_cnhwd[j - image_index_offset]*out_grad_data[j*p.output_channels + out_ch];
+      }
+
+    }
+    shared_data[threadIdx.x] = filter_grad;
+    __syncthreads();
+    if(threadIdx.x < p.output_channels){
+      for(int k = out_ch + p.output_channels; k < blockDim.x; k += p.output_channels){
+        filter_grad += shared_data[k];
+      }
+      filter_grad_data[filter_grad_out_channel_ptr+ out_ch] = filter_grad;
+    }
+  }
 }
 #include <iostream>
 // Partially specialize functor for GpuDevice.
@@ -287,15 +331,15 @@ void SparseConv3DFastGradFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::G
     break;
   }
 
-  size_t smem_size = 10*10*4;
-  err = cudaOccupancyMaxPotentialBlockSize(&block_count, &thread_per_block, SparseConv3DFastFilterGradKernel<T>, smem_size);
-  CHECK_EQ(err, cudaSuccess);
-  CHECK_GT(block_count, 0);
-  std::cout << "1####### " << block_count << " " << thread_per_block << " " << smem_size << std::endl;
-  smem_size = 0;
-  err = cudaOccupancyAvailableDynamicSMemPerBlock(&smem_size, SparseConv3DFastFilterGradKernel<T>, block_count/d.getNumGpuMultiProcessors(), thread_per_block);
-  CHECK_EQ(err, cudaSuccess);
-  std::cout << "2####### " << block_count << " " << thread_per_block << " " << smem_size << " " << d.getNumGpuMultiProcessors()<< std::endl;
+  // size_t smem_size = 10*10*4;
+  // err = cudaOccupancyMaxPotentialBlockSize(&block_count, &thread_per_block, SparseConv3DFastFilterGradKernel<T>, smem_size);
+  // CHECK_EQ(err, cudaSuccess);
+  // CHECK_GT(block_count, 0);
+  // std::cout << "1####### " << block_count << " " << thread_per_block << " " << smem_size << std::endl;
+  // smem_size = 0;
+  // err = cudaOccupancyAvailableDynamicSMemPerBlock(&smem_size, SparseConv3DFastFilterGradKernel<T>, block_count/d.getNumGpuMultiProcessors(), thread_per_block);
+  // CHECK_EQ(err, cudaSuccess);
+  // std::cout << "2####### " << block_count << " " << thread_per_block << " " << smem_size << " " << d.getNumGpuMultiProcessors()<< std::endl;
 };
 
 template struct SparseConv3DFastGradFunctor<Eigen::GpuDevice, float>;

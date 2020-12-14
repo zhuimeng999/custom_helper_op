@@ -22,11 +22,10 @@
 #include "custom_helper_op/cc/kernels/deformable_conv_op.h"
 #include "custom_helper_op/cc/kernels/sparse_conv3d_fast_op.h"
 
-#include <array>
-#include <mutex>
-
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/kernel_shape_util.h"
+
+#include "tensorflow/core/kernels/transpose_functor.h"
 
 namespace tensorflow {
 namespace custom_helper_op {
@@ -34,16 +33,8 @@ namespace custom_helper_op {
 using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
 
-#if GOOGLE_CUDA
-#define EXTERN_TEMPLATE(T)                           \
-  extern template Status Transpose<GPUDevice, T, 5>( \
-      OpKernelContext * ctx, const Tensor &in,       \
-      const gtl::ArraySlice<int32> perm, Tensor *out);
-TF_CALL_float(EXTERN_TEMPLATE);
-TF_CALL_double(EXTERN_TEMPLATE);
-#undef EXTERN_TEMPLATE
-
-#endif  // GOOGLE_CUDA
+extern template struct LaunchTransposeAndReverse<Eigen::GpuDevice, float, 5>;
+extern template struct LaunchTransposeAndReverse<Eigen::GpuDevice, double, 5>;
 namespace functor {
 
 
@@ -180,7 +171,9 @@ class SparseConv3DFastOp : public SparseConv3DFastOpBase<Device, T> {
                             TensorShape({p.input_batches, p.output_rows, p.output_cols, p.output_depths, p.output_channels}),
                             &output));
 
-    OP_REQUIRES_OK(ctx, Transpose<Device, T, 5>(ctx, filter, {4, 0, 1, 2, 3}, &filter_transposed));
+    
+    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {3, 0, 1, 2, 4}, 
+                                                                    {false, false, false, false, false}, &filter_transposed);
 
     SparseConv3DFastFunctor<Device, T>()(ctx->eigen_device<Device>(), p,
                                           images.tensor<T, 5>().data(),
@@ -258,7 +251,9 @@ class SparseConv3DFastGradOp : public SparseConv3DFastOpBase<Device, T> {
         TensorShape({p.input_channels,
                      p.filter_rows, p.filter_cols, p.filter_depths, p.output_channels}),
         &filter_transposed));
-    OP_REQUIRES_OK(ctx, Transpose<Device, T, 5>(ctx, filter, {3, 0, 1, 2, 4}, &filter_transposed));
+        
+    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {4, 0, 1, 2, 3}, 
+                                                                    {false, false, false, false, false}, &filter_transposed);
 
     SparseConv3DFastGradFunctor<Device, T>()(ctx->eigen_device<Device>(), p,
                                           images.tensor<T, 5>().data(),

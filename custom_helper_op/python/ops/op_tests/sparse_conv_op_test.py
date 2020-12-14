@@ -102,6 +102,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
       (2, 32, 40, 16, 48, 90, 100, (3, 3, 3), (2, 2, 2)),
     )
     def testForward(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
+        tf.random.set_seed(np.random.randint(1, tf.int64.max))
         images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
         filters = tf.random.uniform([KERNEL_SIZE[0], KERNEL_SIZE[1], KERNEL_SIZE[2], IN_CHANNELS, OUT_CHANNELS], dtype=tf.float64)
         base_plane = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], minval=0, maxval=(VIRTUAL_DEPTH - IMAGE_DEPTH), dtype=tf.int32)
@@ -196,6 +197,8 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
       (2, 4, 6, 5, 8, 2, 1, (5, 3, 3), (2, 2, 2)),
     )
     def testGradientFloat64(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
+        test_strides = (1, 1, 1)
+        tf.random.set_seed(np.random.randint(1, tf.int64.max))
         images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
         filters = tf.random.uniform([KERNEL_SIZE[0], KERNEL_SIZE[1], KERNEL_SIZE[2], IN_CHANNELS, OUT_CHANNELS], dtype=tf.float64)
         base_plane = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], minval=0, maxval=(VIRTUAL_DEPTH - IMAGE_DEPTH), dtype=tf.int32)
@@ -212,11 +215,12 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
         # images_all = tf.where(mask[..., None], images_all, default_value)
         # images_nn = tf.pad(images_all, [[0, 0], [half_kernel[0], half_kernel[0]], [half_kernel[1], half_kernel[1]], [half_kernel[2], half_kernel[2]], [0, 0]],
         #                                                 mode="CONSTANT", constant_values=default_value)
-
+        cost_grad_perturbation = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT//test_strides[0], (IMAGE_WIDTH + test_strides[1] - 1)//test_strides[1], (IMAGE_DEPTH + test_strides[2] - 1)//test_strides[2], OUT_CHANNELS], dtype=images_all.dtype)
+        
         @tf.function
         def test_check(*args):
-            cost = sparse_conv3d(*args, base_plane, dilations=DILATIONS_SIZE, dynamic_default=True)
-            return tf.reduce_mean(cost)
+            cost = sparse_conv3d(*args, base_plane, dilations=DILATIONS_SIZE, dynamic_default=True, strides=test_strides)
+            return tf.reduce_mean(cost*cost_grad_perturbation)
         with self.cached_session():
             # res = sparse_conv2d(images, filters, base_plane, default_value, offsets)
             theoretical, numerical = gradient_checker_v2.compute_gradient(test_check, [images, filters, default_value])
