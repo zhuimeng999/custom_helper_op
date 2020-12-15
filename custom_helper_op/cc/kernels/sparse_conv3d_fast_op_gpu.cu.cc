@@ -25,7 +25,7 @@ typedef Eigen::GpuDevice GPUDevice;
 // Zeroes count elements starting at ptr using all threads of a 1-D grid.
 // Note: this function does not synchronize, and therefore the memory range is
 // not guaranteed to be zero until the next kernel launch.
-template <typename T>
+template <typename T, bool strideOnOutput>
 __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int64 count, const int kernel_step,
                                                                                           const T* images_data, 
                                                                                           const T* filter_data, 
@@ -36,18 +36,23 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
   // GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char, shared_memory);
   // T *shared_data = reinterpret_cast<T*>(shared_memory);
 
+  const T default_value = ldg(default_channel_value);
+
   for(int64 i = ((blockIdx.x * blockDim.x + threadIdx.x)/CUB_PTX_WARP_THREADS); i < count; i += (gridDim.x * (blockDim.x/CUB_PTX_WARP_THREADS))){
     int32 out_ch  = i % p.output_channels;
-    int32 depth   = i / p.output_channels   % p.output_depths;
+    int32 depth   = i / p.output_channels % p.output_depths;
     int32 col     = i / p.output_channels / p.output_depths % p.output_cols;
     int32 row     = i / p.output_channels / p.output_depths / p.output_cols % p.output_rows;
     const int32 b = i / p.output_channels / p.output_depths / p.output_cols / p.output_rows;
 
     
-    col = col * p.stride_cols;
-    row = row * p.stride_rows;
-
-    depth = (depth + ((__ldg(base_plane_data + (b * p.input_rows + row) * p.input_cols + col) + p.stride_depths - 1)/p.stride_depths))*p.stride_depths;
+    if(strideOnOutput){
+      col = col * p.stride_cols;
+      row = row * p.stride_rows;
+      depth = (depth + ((ldg(base_plane_data + (b * p.input_rows + row) * p.input_cols + col) + p.stride_depths - 1)/p.stride_depths))*p.stride_depths;
+    } else {
+      depth = depth + ldg(base_plane_data + (b * p.output_rows + row) * p.output_cols + col);
+    }
 
     row = row - p.padding_rows;
     col = col - p.padding_cols;
@@ -60,22 +65,43 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
       int32 f_col   = j / p.input_channels / p.filter_depths % p.filter_cols;
       int32 f_row   = j / p.input_channels / p.filter_depths / p.filter_cols;
 
-      int32 in_row = row + f_row * p.dilation_rows;
-      int32 in_col = col + f_col * p.dilation_cols;
+      int32 orign_row = row + f_row * p.dilation_rows;
+      int32 orign_col = col + f_col * p.dilation_cols;
 
-      int64 image_index = (b * p.input_rows + in_row) * p.input_cols + in_col;
-      bool is_padding = CHECK_PADDING(in_row, p.input_rows) | CHECK_PADDING(in_col, p.input_cols);
+      T in_data = default_value;
 
-      if(!is_padding){
-        int32 in_depth = depth + f_depth*p.dilation_depths - __ldg(base_plane_data + image_index);
-        is_padding = CHECK_PADDING(in_depth, p.input_depths);
-        image_index = image_index * p.input_depths + in_depth;
+      if(strideOnOutput){
+        int64 image_index = (b * p.input_rows + orign_row) * p.input_cols + orign_col;
+        bool is_padding = CHECK_PADDING(orign_row, p.input_rows) | CHECK_PADDING(orign_col, p.input_cols);
+
+        if(!is_padding){
+          int32 in_depth = depth + f_depth*p.dilation_depths - ldg(base_plane_data + image_index);
+          is_padding = CHECK_PADDING(in_depth, p.input_depths);
+          image_index = image_index * p.input_depths + in_depth;
+          image_index = image_index * p.input_channels + in_ch;
+          if(!is_padding){
+            in_data = ldg(images_data + image_index);
+          }
+        }
+      } else {
+        int64 image_index = (b * p.output_rows + orign_row) * p.output_cols + orign_col;
+        bool is_padding = CHECK_PADDING(orign_row, p.output_rows) | CHECK_PADDING(orign_col, p.output_cols);
+
+        if(!is_padding){
+          int32 orign_depth = depth + f_depth*p.dilation_depths;
+          is_padding = ((orign_row % p.stride_rows) != 0) | ((orign_col % p.stride_cols) != 0) | ((orign_depth % p.stride_depths) != 0);
+          orign_depth = (orign_depth/p.stride_depths) - (ldg(base_plane_data + image_index) + p.stride_depths - 1)/p.stride_depths ;
+          is_padding |= CHECK_PADDING(orign_depth, p.input_depths);
+          image_index = ((b * p.input_rows + orign_row/p.stride_rows) * p.input_cols + orign_col/p.stride_cols) * p.input_depths + orign_depth;
+          image_index = image_index * p.input_channels + in_ch;
+          if(!is_padding){
+            in_data = ldg(images_data + image_index);
+          }
+        }
       }
-      image_index = image_index * p.input_channels + in_ch;
 
-      T in_data = is_padding?__ldg(default_channel_value):__ldg(images_data + image_index);
 
-      partial_sum += __ldg(filter_data + out_ch*kernel_step + j) * in_data;
+      partial_sum += ldg(filter_data + out_ch*kernel_step + j) * in_data;
     }
 
   //   shared_data[threadIdx.x] = partial_sum;
@@ -104,8 +130,8 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
   }
 }
 
-template <typename T>
-void SparseConv3DFastFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p, 
+template <typename T, bool strideOnOutput>
+void SparseConv3DFastFunctor<Eigen::GpuDevice, T, strideOnOutput>::operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p, 
                                                const T* images_data, 
                                                 const T* filter_data, 
                                                 const T* default_channel_value, 
@@ -123,17 +149,19 @@ void SparseConv3DFastFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::GpuDe
 
   // TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T>, block_per_grid, 
   //                           thread_per_block, thread_per_block*sizeof(T), d.stream(), p, loop_count, kernel_step, images_data, filter_data, default_channel_value, base_plane_data, out_data));
-  CHECK_EQ(cudaOccupancyMaxPotentialBlockSize(&block_per_grid, &thread_per_block, SparseConv3DFastKernel<T>, 0), cudaSuccess);
+  CHECK_EQ(cudaOccupancyMaxPotentialBlockSize(&block_per_grid, &thread_per_block, SparseConv3DFastKernel<T, strideOnOutput>, 0), cudaSuccess);
   CHECK_GT(block_per_grid, 0);
   CHECK_EQ(thread_per_block%32, 0);
 
-  TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T>, block_per_grid, 
+  TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T, strideOnOutput>, block_per_grid, 
                             thread_per_block, 0, d.stream(), p, loop_count, kernel_step, images_data, filter_data, default_channel_value, base_plane_data, out_data));
 
 };
 
-template struct SparseConv3DFastFunctor<Eigen::GpuDevice, float>;
-template struct SparseConv3DFastFunctor<Eigen::GpuDevice, double>;
+template struct SparseConv3DFastFunctor<Eigen::GpuDevice, float, true>;
+template struct SparseConv3DFastFunctor<Eigen::GpuDevice, float, false>;
+template struct SparseConv3DFastFunctor<Eigen::GpuDevice, double, true>;
+template struct SparseConv3DFastFunctor<Eigen::GpuDevice, double, false>;
 
 template <typename T, int BLOCK_THREADS>
 __global__ void SparseConv3DFastGradKernel(const SparseConv3DFastParams p, const int64 count, const int kernel_step,
@@ -211,57 +239,6 @@ __global__ void SparseConv3DFastGradKernel(const SparseConv3DFastParams p, const
 }
 
 
-template <typename T>
-__global__ void SparseConv3DFastFilterGradKernel(const SparseConv3DFastParams p, const int64 count, const int image_size,
-                                                                                          const T* image_cnhwd,
-                                                                                          const T* out_grad_data,                                                                                         
-                                                                                          const T* filter_data, 
-                                                                                          const T* default_channel_value, 
-                                                                                          const int32* base_plane_data,
-                                                                                          T * filter_grad_data)
-{
-  GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char, shared_memory);
-
-  T * shared_data = reinterpret_cast<T *>(shared_memory);
-
-  assert((blockDim.x % p.output_channels) == 0);
-  int out_ch = threadIdx.x%p.output_channels;
-  int d_offset = threadIdx.x/p.output_channels;
-  for(int i = blockIdx.x; i < count; i += gridDim.x){
-    int depth = i % p.filter_depths;
-    int col = i / p.filter_depths % p.filter_cols;
-    int row = i / p.filter_depths/ p.filter_cols % p.filter_rows;
-    int in_ch = i / p.filter_depths/ p.filter_cols /p.filter_rows;
-
-    int filter_grad_out_channel_ptr = (((row*p.filter_cols + col)*p.filter_depths + depth)*p.input_channels+in_ch)*p.output_channels;
-    depth = depth - p.padding_depths;
-    col = col - p.padding_cols;
-    row = row - p.padding_rows;
-
-    int image_index_offset = (row * p.input_cols+ col)*p.input_depths + depth;
-    T filter_grad = T(0.);
-    for(int j = threadIdx.x; j < image_size; j += d_offset){
-      int im_d = j % p.input_depths + depth;
-      int im_c = j / p.input_depths % p.input_cols + col;
-      int im_r = j / p.input_depths / p.input_cols % p.input_rows + row;
-      
-      if(CHECK_PADDING(im_r, p.input_rows) || CHECK_PADDING(im_c, p.input_cols) || CHECK_PADDING(im_d, p.input_depths)){
-
-      } else {
-        filter_grad += image_cnhwd[j - image_index_offset]*out_grad_data[j*p.output_channels + out_ch];
-      }
-
-    }
-    shared_data[threadIdx.x] = filter_grad;
-    __syncthreads();
-    if(threadIdx.x < p.output_channels){
-      for(int k = out_ch + p.output_channels; k < blockDim.x; k += p.output_channels){
-        filter_grad += shared_data[k];
-      }
-      filter_grad_data[filter_grad_out_channel_ptr+ out_ch] = filter_grad;
-    }
-  }
-}
 #include <iostream>
 // Partially specialize functor for GpuDevice.
 template <typename T>
@@ -331,6 +308,93 @@ void SparseConv3DFastGradFunctor<Eigen::GpuDevice, T>::operator()(const Eigen::G
 template struct SparseConv3DFastGradFunctor<Eigen::GpuDevice, float>;
 template struct SparseConv3DFastGradFunctor<Eigen::GpuDevice, double>;
 
+template <typename T>
+__global__ void SparseConv3DFastFilterGradKernel(const int32 count, const SparseConv3DFastParams p, const int image_step,
+                                                                                          const T* image_cnhwd,                                                                 
+                                                                                          const T* filter_data, 
+                                                                                          const T* default_channel_value, 
+                                                                                          const int32* base_plane_data,
+                                                                                          const T* out_grad_data, 
+                                                                                          T * filter_grad_data,
+                                                                                          T * default_channel_value_grad)
+{
+  GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char, shared_memory);
+
+  volatile T * shared_data = reinterpret_cast<T *>(shared_memory);
+
+  // assert(shared_data & 0xFF == 0);
+  assert((blockDim.x % p.output_channels) == 0);
+  int out_ch = threadIdx.x%p.output_channels;
+  int d_step = blockDim.x/p.output_channels;
+  for(int i = blockIdx.x; i < count; i += gridDim.x){
+    int depth = i % p.filter_depths;
+    int col   = i / p.filter_depths % p.filter_cols;
+    int row   = i / p.filter_depths / p.filter_cols % p.filter_rows;
+    int in_ch = i / p.filter_depths / p.filter_cols / p.filter_rows;
+
+    int filter_grad_out_channel_ptr = (((row*p.filter_cols + col)*p.filter_depths + depth)*p.input_channels+in_ch)*p.output_channels;
+    depth = depth * p.dilation_depths - p.padding_depths;
+    col = col * p.dilation_cols - p.padding_cols;
+    row = row * p.dilation_rows - p.padding_rows;
+  
+    int image_index_offset = (row * p.input_cols+ col)*p.input_depths + depth;
+    volatile T filter_grad = T(0.);
+    for(int j = threadIdx.x/p.output_channels; j < image_step; j += d_step){
+      int im_d = j % p.output_depths + depth;
+      int im_c = j / p.output_depths % p.output_cols + col;
+      int im_r = j / p.output_depths / p.output_cols % p.output_rows + row;
+      int im_n = j / p.output_depths / p.output_cols / p.output_rows;
+      
+      if(CHECK_PADDING(im_r, p.input_rows) || CHECK_PADDING(im_c, p.input_cols) || CHECK_PADDING(im_d, p.input_depths)){
+
+      } else {
+        filter_grad += image_cnhwd[in_ch * image_step + j + image_index_offset]*out_grad_data[j*p.output_channels + out_ch];
+      }
+    }
+    shared_data[threadIdx.x] = filter_grad;
+    __syncthreads();
+    if(threadIdx.x < p.output_channels){
+      for(int k = out_ch + p.output_channels; k < blockDim.x; k += p.output_channels){
+        filter_grad += shared_data[k];
+      }
+      filter_grad_data[filter_grad_out_channel_ptr + out_ch] = filter_grad;
+    }
+  }
+}
+template <typename T, bool strideOnOutput, bool dynamic_default>
+void SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, T, strideOnOutput, dynamic_default>::operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p,
+                                                const T* images_data, 
+                                                const T* filter_data, 
+                                                const T* default_channel_value, 
+                                                const int32* base_plane_data,
+                                                const T * out_grad_data,
+                                                T * filter_grad_data,
+                                                T * default_channel_value_grad)
+{
+  int32 loop_count = p.filter_rows*p.filter_cols*p.filter_depths*p.input_channels;
+  int image_step = p.input_batches*p.output_rows*p.output_cols*p.output_depths;
+
+  int block_per_grid = 0;
+  int thread_per_block = 0;
+  CHECK_EQ(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&block_per_grid, &thread_per_block, SparseConv3DFastFilterGradKernel<T>, [](int x){return x*sizeof(T);}), cudaSuccess);
+  CHECK_GT(block_per_grid, 0);
+  CHECK_EQ(thread_per_block%32, 0);
+
+  thread_per_block = thread_per_block/p.output_channels*p.output_channels;
+  CHECK_GT(thread_per_block, 0);
+  TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastFilterGradKernel<T>, block_per_grid, thread_per_block, (thread_per_block + 10)*sizeof(T), d.stream(), 
+                                                                loop_count, p, image_step, 
+                                                                images_data, filter_data, default_channel_value, base_plane_data, out_grad_data, 
+                                                                filter_grad_data, default_channel_value_grad));
+}
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, float, true, true>;
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, float, true, false>;
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, float, false, true>;
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, float, false, false>;
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, double, true, true>;
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, double, true, false>;
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, double, false, true>;
+template struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, double, false, false>;
 } /* functor */
 } /* custom_helper_op */
 } /* tensorflow */

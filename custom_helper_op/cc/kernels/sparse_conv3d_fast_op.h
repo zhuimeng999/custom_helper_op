@@ -102,7 +102,7 @@ static void launch(OpKernelContext *ctx, const Tensor &in,
 
 namespace functor {
 
-template <typename Device, typename T>
+template <typename Device, typename T, bool strideOnOutput>
 struct SparseConv3DFastFunctor {
 // Computes on device "d": out = out.constant(in(0)),
 void operator()(const Device& d, const SparseConv3DFastParams p,
@@ -115,8 +115,8 @@ void operator()(const Device& d, const SparseConv3DFastParams p,
 
 #if GOOGLE_CUDA
 // Partially specialize functor for GpuDevice.
-template <typename T>
-struct SparseConv3DFastFunctor<Eigen::GpuDevice, T> {
+template <typename T, bool strideOnOutput>
+struct SparseConv3DFastFunctor<Eigen::GpuDevice, T, strideOnOutput> {
 void operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p,
                                                 const T* images_data, 
                                                 const T* filter_data, 
@@ -152,6 +152,35 @@ void operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p,
                                                 const int32* base_plane_data,
                                                 const T * out_grad_data,
                                                 T * images_grad_data,
+                                                T * filter_grad_data,
+                                                T * default_channel_value_grad);
+};
+#endif
+
+template <typename Device, typename T, bool strideOnOutput, bool dynamic_default>
+struct SparseConv3DFastFilterGradFunctor {
+// Computes on device "d": out = out.constant(in(0)),
+void operator()(const Device& d, const SparseConv3DFastParams p,
+                                                const T* images_data, 
+                                                const T* filter_data, 
+                                                const T* default_channel_value, 
+                                                const int32* base_plane_data,
+                                                const T * out_grad_data,
+                                                T * filter_grad_data,
+                                                T * default_channel_value_grad);
+};
+
+#if GOOGLE_CUDA
+// Partially specialize functor for GpuDevice.
+template <typename T, bool strideOnOutput, bool dynamic_default>
+struct SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, T, strideOnOutput, dynamic_default> {
+// Computes on device "d": out = out.constant(in(0)),
+void operator()(const Eigen::GpuDevice& d, const SparseConv3DFastParams p,
+                                                const T* images_data, 
+                                                const T* filter_data, 
+                                                const T* default_channel_value, 
+                                                const int32* base_plane_data,
+                                                const T * out_grad_data,
                                                 T * filter_grad_data,
                                                 T * default_channel_value_grad);
 };
