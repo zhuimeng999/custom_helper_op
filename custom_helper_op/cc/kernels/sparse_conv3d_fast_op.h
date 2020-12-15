@@ -29,7 +29,6 @@ struct SparseConv3DFastParams {
   int32 input_rows;
   int32 input_cols;
   int32 input_depths;
-  int32 filter_channels;
   int32 filter_rows;
   int32 filter_cols;
   int32 filter_depths;
@@ -46,7 +45,6 @@ struct SparseConv3DFastParams {
   int32 output_rows;
   int32 output_cols;
   int32 output_depths;
-  int32 batches;
   bool dynamic_default;
 };
 
@@ -59,8 +57,10 @@ static void launch(OpKernelContext *ctx, const Tensor &in,
   const auto d = ctx->template eigen_device<Device>();
 
   Eigen::array<int, NDIMS> p;
+  bool should_shuffle = false;
   for (int i = 0; i < NDIMS; ++i) {
     p[i] = perm[i];
+    should_shuffle |= (i != perm[i]);
   }
 
   bool should_reverse = false;
@@ -80,17 +80,21 @@ static void launch(OpKernelContext *ctx, const Tensor &in,
   const bool use_64bit = x.size() > Eigen::NumTraits<int>::highest();
 
   if (!use_64bit && Eigen::internal::is_same<Device, Eigen::GpuDevice>::value) {
-    if(should_reverse){
-
-    } else {
+    if(should_shuffle && should_reverse){
+      To32Bit(y).device(d) = To32Bit(x).reverse(r).shuffle(p);
+    } else if(should_shuffle) {
       To32Bit(y).device(d) = To32Bit(x).shuffle(p);
+    } else if(should_reverse) {
+      To32Bit(y).device(d) = To32Bit(x).reverse(p);
     }
 
   } else {
-    if(should_reverse){
-
-    } else {
+    if(should_shuffle && should_reverse){
+      y.device(d) = x.reverse(r).shuffle(p);
+    } else if(should_shuffle) {
       y.device(d) = x.shuffle(p);
+    } else if(should_reverse) {
+      y.device(d) = x.reverse(p);
     }
   }
 }

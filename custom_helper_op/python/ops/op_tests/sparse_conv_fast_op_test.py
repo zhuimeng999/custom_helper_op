@@ -110,12 +110,13 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
 
 
     @parameterized.parameters(
-      (1, 6, 7, 4, 4, 1, 1, (3, 3, 3), (1, 1, 1)),
-      # (1, 8, 13, 6, 15, 3, 4, (3, 3, 3), (1, 1, 1)),
-      # (2, 4, 6, 5, 8, 2, 1, (5, 3, 3), (2, 2, 2)),
+      (1, 6, 7, 4, 8, 3, 6, (3, 3, 3), (1, 1, 1)),
+      (1, 8, 13, 6, 15, 3, 4, (3, 3, 3), (1, 1, 1)),
+      (2, 4, 6, 5, 8, 2, 1, (5, 3, 3), (2, 2, 2)),
+      (3, 4, 6, 4, 8, 2, 3, (2, 2, 1), (2, 2, 2)),
     )
     def testGradientFloat64(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
-        test_strides = (2, 1, 1)
+        test_strides = (1, 1, 1)
 
         tf.random.set_seed(np.random.randint(0, tf.int64.max))
         images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
@@ -123,8 +124,8 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
         base_plane = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], minval=0, maxval=(VIRTUAL_DEPTH - IMAGE_DEPTH + 1), dtype=tf.int32)
         # test_start_d = 5
         # base_plane = tf.ones([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], dtype=tf.int32) * test_start_d
-        default_value = tf.random.uniform([], dtype=images_all.dtype)
-        # default_value = tf.constant(0, dtype=images_all.dtype)
+        # default_value = tf.random.uniform([], dtype=images_all.dtype)
+        default_value = tf.constant(0, dtype=images_all.dtype)
 
         half_kernel = np.array(KERNEL_SIZE)//2
         gather_indice = base_plane + np.arange(0, IMAGE_DEPTH, dtype=np.int32)[None, None, None, :]
