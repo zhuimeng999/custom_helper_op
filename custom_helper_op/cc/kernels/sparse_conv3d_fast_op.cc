@@ -43,8 +43,8 @@ namespace functor {
 template <typename Device, typename T>
 class SparseConv3DFastOpBase : public OpKernel {
  public:
-  explicit SparseConv3DFastOpBase(OpKernelConstruction *ctx)
-      : OpKernel(ctx), p{} {
+  explicit SparseConv3DFastOpBase(OpKernelConstruction *ctx, bool _is_transpose)
+      : OpKernel(ctx), is_transpose(_is_transpose), p{} {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("strides", &strides));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("dilations", &dilations));
     string data_format_str;
@@ -82,26 +82,41 @@ class SparseConv3DFastOpBase : public OpKernel {
     const auto filter_depths = filter.dim_size(2);
     const auto output_channels = filter.dim_size(4);
 
-    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == input_batches)
-                      && (base_plane.dim_size(1) == input_rows) && (base_plane.dim_size(2) == input_cols) && (base_plane.dim_size(3) == 1),
-                errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image, got ", base_plane.shape().DebugString()));
-
     int64 output_rows, output_cols, output_depths;
     int64 padding_rows, padding_cols, padding_depths;
     int64 padding_after_dummy;
-    OP_REQUIRES_OK(
+    if(is_transpose){
+      output_rows = input_rows * strides[0];
+      output_cols = input_cols * strides[1];
+      output_depths = input_depths * strides[2];
+
+      padding_rows = p.filter_rows/2 * p.dilation_rows;
+      padding_cols = p.filter_cols/2 * p.dilation_cols;
+      padding_depths = p.filter_depths/2 * p.dilation_depths;
+
+      OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == input_batches)
+                      && (base_plane.dim_size(1) == output_rows) && (base_plane.dim_size(2) == output_cols) && (base_plane.dim_size(3) == 1),
+                errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image, got ", base_plane.shape().DebugString()));
+    } else {
+      OP_REQUIRES_OK(
         ctx, GetWindowedOutputSizeVerboseV2(input_rows, filter_rows, dilations[0],
                                          strides[0], Padding::SAME, &output_rows,
                                          &padding_after_dummy, &padding_rows));
-    OP_REQUIRES_OK(
-        ctx, GetWindowedOutputSizeVerboseV2(input_cols, filter_cols, dilations[1],
-                                         strides[1], Padding::SAME, &output_cols,
-                                         &padding_after_dummy, &padding_cols));
+      OP_REQUIRES_OK(
+          ctx, GetWindowedOutputSizeVerboseV2(input_cols, filter_cols, dilations[1],
+                                          strides[1], Padding::SAME, &output_cols,
+                                          &padding_after_dummy, &padding_cols));
 
-    OP_REQUIRES_OK(
-        ctx, GetWindowedOutputSizeVerboseV2(input_depths, filter_depths, dilations[2],
-                                         strides[2], Padding::SAME, &output_depths,
-                                         &padding_after_dummy, &padding_depths));
+      OP_REQUIRES_OK(
+          ctx, GetWindowedOutputSizeVerboseV2(input_depths, filter_depths, dilations[2],
+                                          strides[2], Padding::SAME, &output_depths,
+                                          &padding_after_dummy, &padding_depths));
+
+      OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == input_batches)
+                      && (base_plane.dim_size(1) == input_rows) && (base_plane.dim_size(2) == input_cols) && (base_plane.dim_size(3) == 1),
+                errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image, got ", base_plane.shape().DebugString()));
+    }
+
 
     // std::cout << "##" <<  output_rows << " " << output_cols << " " << output_depths << std::endl;
     // std::cout << "##" <<  padding_rows << " " << padding_cols << " " << padding_depths << std::endl;
@@ -129,24 +144,28 @@ class SparseConv3DFastOpBase : public OpKernel {
     p.dynamic_default = dynamic_default;
   }
 
- protected:
-  TensorFormat data_format;
-  SparseConv3DFastParams p;
-  bool dynamic_default;
+
 
  private:
   std::vector<int32> strides;
   std::vector<int32> dilations;
+  bool is_transpose;
+ protected:
+  TensorFormat data_format;
+  SparseConv3DFastParams p;
+  bool dynamic_default;
 };
 
 using functor::SparseConv3DFastFunctor;
+// using functor::SparseConv3DFastGradFunctor;
+using functor::SparseConv3DFastFilterGradFunctor;
 
 template <typename Device, typename T>
 class SparseConv3DFastOp : public SparseConv3DFastOpBase<Device, T> {
   using SparseConv3DFastOpBase<Device, T>::p;
  public:
   explicit SparseConv3DFastOp(OpKernelConstruction* ctx)
-      : SparseConv3DFastOpBase<Device, T>(ctx) {
+      : SparseConv3DFastOpBase<Device, T>(ctx, false) {
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -202,15 +221,12 @@ TF_CALL_double(REGISTER);
 
 #endif  // GOOGLE_CUDA
 
-// using functor::SparseConv3DFastGradFunctor;
-using functor::SparseConv3DFastFilterGradFunctor;
-
 template <typename Device, typename T>
 class SparseConv3DFastGradOp : public SparseConv3DFastOpBase<Device, T> {
   using SparseConv3DFastOpBase<Device, T>::p;
  public:
   explicit SparseConv3DFastGradOp(OpKernelConstruction* ctx)
-      : SparseConv3DFastOpBase<Device, T>(ctx) {
+      : SparseConv3DFastOpBase<Device, T>(ctx, false) {
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -246,18 +262,31 @@ class SparseConv3DFastGradOp : public SparseConv3DFastOpBase<Device, T> {
                               &default_channels_value_grad));
 
 
-    /*temp usage of image_grad, default_channels_value_grad storage */
+    /*temp usage of image_grad storage */
     LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, images, {4, 0, 1, 2, 3}, 
                                                                     {false, false, false, false, false}, images_grad);
 
-    SparseConv3DFastFilterGradFunctor<Device, T, false, false>()(ctx->eigen_device<Device>(), p,
-                                          images_grad->tensor<T, 5>().data(),
-                                          filter.tensor<T, 5>().data(), 
-                                          default_channels_value.flat<T>().data(),
-                                          base_plane.tensor<int32, 4>().data(),
-                                          out_grad.tensor<T, 5>().data(),
-                                          filter_grad->tensor<T, 5>().data(),
-                                          default_channels_value_grad->flat<T>().data());
+    TensorSetZero<Device, T>(ctx, default_channels_value_grad);
+    if(p.dynamic_default){
+      SparseConv3DFastFilterGradFunctor<Device, T, false, true>()(ctx->eigen_device<Device>(), p,
+                                            images_grad->tensor<T, 5>().data(),
+                                            filter.tensor<T, 5>().data(), 
+                                            default_channels_value.flat<T>().data(),
+                                            base_plane.tensor<int32, 4>().data(),
+                                            out_grad.tensor<T, 5>().data(),
+                                            filter_grad->tensor<T, 5>().data(),
+                                            default_channels_value_grad->flat<T>().data());
+    } else {
+      SparseConv3DFastFilterGradFunctor<Device, T, false, false>()(ctx->eigen_device<Device>(), p,
+                                            images_grad->tensor<T, 5>().data(),
+                                            filter.tensor<T, 5>().data(), 
+                                            default_channels_value.flat<T>().data(),
+                                            base_plane.tensor<int32, 4>().data(),
+                                            out_grad.tensor<T, 5>().data(),
+                                            filter_grad->tensor<T, 5>().data(),
+                                            default_channels_value_grad->flat<T>().data());
+    }
+
 
     Tensor filter_transposed;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(
@@ -302,6 +331,182 @@ typedef Eigen::GpuDevice GPUDevice;
                               .Device(DEVICE_GPU)                   \
                               .TypeConstraint<TYPE>("dtype"),        \
                           SparseConv3DFastGradOp<GPUDevice, TYPE>)
+
+TF_CALL_float(REGISTER);
+TF_CALL_double(REGISTER);
+#undef REGISTER
+
+#endif  // GOOGLE_CUDA
+
+template <typename Device, typename T>
+class SparseConv3DTransposeFastOp : public SparseConv3DFastOpBase<Device, T> {
+  using SparseConv3DFastOpBase<Device, T>::p;
+ public:
+  explicit SparseConv3DTransposeFastOp(OpKernelConstruction* ctx)
+      : SparseConv3DFastOpBase<Device, T>(ctx, true) {
+  }
+
+  void Compute(OpKernelContext* ctx) override {
+    SparseConv3DFastOpBase<Device, T>::Compute(ctx);
+
+    const Tensor& images = ctx->input(0);
+    const Tensor& filter = ctx->input(1);
+    const Tensor& default_channels_value = ctx->input(2);
+    const Tensor& base_plane = ctx->input(3);
+
+    Tensor filter_transposed;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(
+        DataTypeToEnum<T>::value,
+        TensorShape({p.output_channels,
+                     p.filter_rows, p.filter_cols, p.filter_depths, p.input_channels}),
+        &filter_transposed));
+
+    Tensor *output;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            0,
+                            TensorShape({p.input_batches, p.output_rows, p.output_cols, p.output_depths, p.output_channels}),
+                            &output));
+
+    
+    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {4, 0, 1, 2, 3}, 
+                                                                    {false, false, false, false, false}, &filter_transposed);
+
+    SparseConv3DFastFunctor<Device, T, true>()(ctx->eigen_device<Device>(), p,
+                                          images.tensor<T, 5>().data(),
+                                          filter_transposed.tensor<T, 5>().data(), 
+                                          default_channels_value.flat<T>().data(),
+                                          base_plane.tensor<int32, 4>().data(),
+                                          output->tensor<T, 5>().data());
+
+  }
+private:
+  TF_DISALLOW_COPY_AND_ASSIGN(SparseConv3DTransposeFastOp);
+};
+
+#if GOOGLE_CUDA
+
+#define REGISTER(TYPE)                                              \
+  REGISTER_KERNEL_BUILDER(Name("SparseConv3DTransposeFast") \
+                              .Device(DEVICE_GPU)                   \
+                              .TypeConstraint<TYPE>("dtype"),        \
+                          SparseConv3DTransposeFastOp<GPUDevice, TYPE>)
+
+TF_CALL_float(REGISTER);
+TF_CALL_double(REGISTER);
+#undef REGISTER
+
+#endif  // GOOGLE_CUDA
+
+template <typename Device, typename T>
+class SparseConv3DTransposeFastGradOp : public SparseConv3DFastOpBase<Device, T> {
+  using SparseConv3DFastOpBase<Device, T>::p;
+ public:
+  explicit SparseConv3DTransposeFastGradOp(OpKernelConstruction* ctx)
+      : SparseConv3DFastOpBase<Device, T>(ctx, true) {
+  }
+
+  void Compute(OpKernelContext* ctx) override {
+    SparseConv3DFastOpBase<Device, T>::Compute(ctx);
+    
+    const Tensor& images = ctx->input(0);
+    const Tensor& filter = ctx->input(1);
+    const Tensor& default_channels_value = ctx->input(2);
+    const Tensor& base_plane = ctx->input(3);
+
+    const Tensor& out_grad = ctx->input(4);
+
+    // std::cout << p.input_batches << " " << p.output_rows << " " << p.output_cols << " " << p.output_depths << " " << p.output_channels << std::endl;
+    OP_REQUIRES(ctx, (out_grad.shape().dims() == 5) && (out_grad.dim_size(0) == p.input_batches)
+                      && (out_grad.dim_size(1) == p.output_rows) && (out_grad.dim_size(2) == p.output_cols) && (out_grad.dim_size(3) == p.output_depths)
+                      && (out_grad.dim_size(4) == p.output_channels),
+                errors::InvalidArgument("out_grad must have rank 5, and must compate to ref_image, got ", out_grad.shape().DebugString()));
+
+    Tensor *images_grad;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            0,
+                            images.shape(),
+                            &images_grad));
+    Tensor *filter_grad;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            1,
+                            filter.shape(),
+                            &filter_grad));
+    Tensor *default_channels_value_grad;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                              2,
+                              default_channels_value.shape(),
+                              &default_channels_value_grad));
+
+
+    /*temp usage of image_grad storage */
+    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, images, {4, 0, 1, 2, 3}, 
+                                                                    {false, false, false, false, false}, images_grad);
+
+    TensorSetZero<Device, T>(ctx, default_channels_value_grad);
+    if(p.dynamic_default){
+      SparseConv3DFastFilterGradFunctor<Device, T, false, true>()(ctx->eigen_device<Device>(), p,
+                                            images_grad->tensor<T, 5>().data(),
+                                            filter.tensor<T, 5>().data(), 
+                                            default_channels_value.flat<T>().data(),
+                                            base_plane.tensor<int32, 4>().data(),
+                                            out_grad.tensor<T, 5>().data(),
+                                            filter_grad->tensor<T, 5>().data(),
+                                            default_channels_value_grad->flat<T>().data());
+    } else {
+      SparseConv3DFastFilterGradFunctor<Device, T, false, false>()(ctx->eigen_device<Device>(), p,
+                                            images_grad->tensor<T, 5>().data(),
+                                            filter.tensor<T, 5>().data(), 
+                                            default_channels_value.flat<T>().data(),
+                                            base_plane.tensor<int32, 4>().data(),
+                                            out_grad.tensor<T, 5>().data(),
+                                            filter_grad->tensor<T, 5>().data(),
+                                            default_channels_value_grad->flat<T>().data());
+    }
+
+
+    Tensor filter_transposed;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(
+        DataTypeToEnum<T>::value,
+        TensorShape({p.output_channels,
+                     p.filter_rows, p.filter_cols, p.filter_depths, p.input_channels}),
+        &filter_transposed));
+
+    Tensor zero_default;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(
+        DataTypeToEnum<T>::value,
+        default_channels_value.shape(),
+        &zero_default));
+
+    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {3, 0, 1, 2, 4}, 
+                                                                    {true, true, true, false, false}, &filter_transposed);
+    TensorSetZero<Device, T>(ctx, &zero_default);
+
+    SparseConv3DFastParams grad_p = p;
+    std::swap(grad_p.input_channels, grad_p.output_channels);
+    std::swap(grad_p.input_rows, grad_p.output_rows);
+    std::swap(grad_p.input_cols, grad_p.output_cols);
+    std::swap(grad_p.input_depths, grad_p.output_depths);
+    SparseConv3DFastFunctor<Device, T, false>()(ctx->eigen_device<Device>(), grad_p,
+                                          out_grad.tensor<T, 5>().data(),
+                                          filter_transposed.tensor<T, 5>().data(), 
+                                          zero_default.flat<T>().data(),
+                                          base_plane.tensor<int32, 4>().data(),
+                                          images_grad->tensor<T, 5>().data());
+
+  }
+private:
+  TF_DISALLOW_COPY_AND_ASSIGN(SparseConv3DTransposeFastGradOp);
+};
+
+#if GOOGLE_CUDA
+
+typedef Eigen::GpuDevice GPUDevice;
+
+#define REGISTER(TYPE)                                              \
+  REGISTER_KERNEL_BUILDER(Name("SparseConv3DTransposeFastGrad") \
+                              .Device(DEVICE_GPU)                   \
+                              .TypeConstraint<TYPE>("dtype"),        \
+                          SparseConv3DTransposeFastGradOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
 TF_CALL_double(REGISTER);

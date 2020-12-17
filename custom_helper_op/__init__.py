@@ -25,7 +25,8 @@ from custom_helper_op.python.ops.custom_helper_ops import (cost_volume, cost_vol
                                                             sparse_conv2d,
                                                             sparse_pad,
                                                             sparse_conv3d,
-                                                            sparse_conv3d_fast)
+                                                            sparse_conv3d_fast,
+                                                            sparse_conv3d_transpose_fast)
 from custom_helper_op.python.layers.custom_layers import (DepthProjectLayer, CostMapLayer, 
                                                             CostMapLayerV2, 
                                                             SparseConv3DLayer, 

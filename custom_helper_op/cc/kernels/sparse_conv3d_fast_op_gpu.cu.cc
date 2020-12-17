@@ -329,28 +329,34 @@ __global__ void SparseConv3DFastFilterGradKernel(const int32 count, const Sparse
     int in_ch = i / p.filter_depths / p.filter_cols / p.filter_rows;
 
     int filter_grad_out_channel_ptr = (((row*p.filter_cols + col)*p.filter_depths + depth)*p.input_channels+in_ch)*p.output_channels;
-    depth = depth * p.dilation_depths - p.padding_depths;
+
     col = col * p.dilation_cols - p.padding_cols;
     row = row * p.dilation_rows - p.padding_rows;
-  
+    depth = depth * p.dilation_depths - p.padding_depths;
+    
     int image_index_offset = (row * p.input_cols+ col)*p.input_depths + depth;
     T filter_grad = T(0.);
     for(int j = out_id_in_step; j < image_step; j += d_step){
-      int im_d = j % p.output_depths + depth;
-      int im_c = j / p.output_depths % p.output_cols + col;
-      int im_r = j / p.output_depths / p.output_cols % p.output_rows + row;
+      int im_d = j % p.output_depths;
+      int im_c = j / p.output_depths % p.output_cols;
+      int im_r = j / p.output_depths / p.output_cols % p.output_rows;
       int im_n = j / p.output_depths / p.output_cols / p.output_rows;
       
-      bool is_padding = CHECK_PADDING(im_r, p.input_rows) | CHECK_PADDING(im_c, p.input_cols);
-      is_padding |= CHECK_PADDING(im_d, p.input_depths);
+      int out_d = ldg(base_plane_data + (im_n*p.input_rows + im_r * p.stride_rows)*p.input_cols+im_c * p.stride_cols);
+      im_r = im_r * p.stride_rows + row;
+      im_c = im_c * p.stride_cols + col;
+      im_d = (im_d + (out_d + p.stride_depths - 1)/p.stride_depths) * p.stride_depths + depth 
+                                          - ldg(base_plane_data + (im_n*p.input_rows + im_r)*p.input_cols+im_c);
+      
+      bool is_padding = CHECK_PADDING(im_r, p.input_rows) | CHECK_PADDING(im_c, p.input_cols) | CHECK_PADDING(im_d, p.input_depths);
 
       T filter_grad_factor = default_value;
       if( is_padding ){
         if(dynamic_default){
-          default_value_grad +=  0.;
+          default_value_grad +=  filter_data[filter_grad_out_channel_ptr + out_ch]*ldg(out_grad_data + j*p.output_channels + out_ch);
         }
       } else {
-        filter_grad_factor = ldg(image_cnhwd + in_ch * image_step + j + image_index_offset);
+        filter_grad_factor = ldg(image_cnhwd + (((in_ch * p.input_batches + im_n)*p.input_rows + im_r)*p.input_cols + im_c)*p.input_depths + im_d);
       }
       filter_grad += filter_grad_factor*ldg(out_grad_data + j*p.output_channels + out_ch);
     }
@@ -383,8 +389,19 @@ __global__ void SparseConv3DFastFilterGradKernel(const int32 count, const Sparse
   if(dynamic_default){
     shared_data[threadIdx.x] = default_value_grad;
     __syncthreads();
+    int is_odd = blockDim.x%2;
+    int offset = blockDim.x/2;
+    while(offset > 0){
+      if(threadIdx.x < offset){
+        shared_data[is_odd + threadIdx.x ] += shared_data[is_odd + threadIdx.x + offset];
+      }
+      __syncthreads();
+      offset = offset + is_odd;
+      is_odd = offset%2;
+      offset = offset/2;
+    }
     if(threadIdx.x == 0){
-      atomicAdd(default_channel_value_grad, default_value_grad);
+      atomicAdd(default_channel_value_grad, shared_data[0]);
     }
   }
 }

@@ -287,6 +287,33 @@ def _sparse_conv3d_fast_grad(op, out_grad):
 
 tf.no_gradient("SparseConv3DFastGrad")
 
+@tf.function
+def sparse_conv3d_transpose_fast(images, filters, default_value, base_plane, data_format='NDHWC', strides=(1, 1, 1), dilations=(1, 1, 1), dynamic_default=False, name=None):
+    with tf.name_scope(name or "sparse_conv3d_transpose_fast"):
+        return _custom_helper_ops.sparse_conv3d_transpose_fast(images=images, filters=filters, default_value=default_value, base_plane=base_plane, 
+                                                        data_format=data_format, strides=strides, dilations=dilations, dynamic_default=dynamic_default)
+
+
+@tf.RegisterGradient("SparseConv3DTransposeFast")
+def _sparse_conv3d_transpose_fast_grad(op, out_grad):
+    images, filters, default_value, base_plane = op.inputs
+    # cost, cost_mask = op.outputs
+    images_grad, filter_grad, default_value_grad = _custom_helper_ops.sparse_conv3d_transpose_fast_grad(images=images, 
+                                                                                          filters=filters, 
+                                                                                          default_value=default_value,
+                                                                                          base_plane=base_plane, 
+                                                                                          out_grad=out_grad,
+                                                                                          data_format=op.get_attr('data_format'),
+                                                                                          strides=op.get_attr("strides"),
+                                                                                          dilations=op.get_attr("dilations"),
+                                                                                          dynamic_default=op.get_attr("dynamic_default")
+                                                                                          )
+    if op.get_attr("dynamic_default") is False:
+        default_value_grad = None
+    return [images_grad, filter_grad, default_value_grad, None]
+
+tf.no_gradient("SparseConv3DTransposeFastGrad")
+
 def decode_pfm(contents, name=None):
     """
     Decode a PNM-encoded image to a uint8 tensor.
