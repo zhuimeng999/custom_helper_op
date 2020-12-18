@@ -62,61 +62,67 @@ class SparseConv3DFastOpBase : public OpKernel {
     const Tensor& default_channels_value = ctx->input(2);
     const Tensor& base_plane = ctx->input(3);
 
-
     OP_REQUIRES(ctx, TensorShapeUtils::IsScalar(default_channels_value.shape()),
                 errors::InvalidArgument("default_value must be scalar: ",
                                         default_channels_value.shape().DebugString()));
     OP_REQUIRES(ctx, images.shape().dims() == 5,
                 errors::InvalidArgument("images must have rank 4"));
 
-    const auto input_batches = images.dim_size(0);
-    const auto input_rows = images.dim_size(1);
-    const auto input_cols = images.dim_size(2);
-    const auto input_depths = images.dim_size(3);
-    const auto input_channels = images.dim_size(4);
+    OP_REQUIRES(ctx, filter.shape().dims() == 5,
+                errors::InvalidArgument("filter must have rank 4"));
 
-    OP_REQUIRES(ctx, (filter.shape().dims() == 5) && (filter.dim_size(3) == input_channels),
-                errors::InvalidArgument("filter must have rank 5, and must compate to ref_image"));
     const auto filter_rows = filter.dim_size(0);
     const auto filter_cols = filter.dim_size(1);
     const auto filter_depths = filter.dim_size(2);
+    const auto input_channels = filter.dim_size(3);
     const auto output_channels = filter.dim_size(4);
+
+    int64 input_batches;
+    int64 input_rows;
+    int64 input_cols;
+    int64 input_depths;
+    if(is_transpose){
+      input_batches = images.dim_size(0);
+      const Tensor& output_shape = ctx->input(4);
+      OP_REQUIRES(ctx, (output_shape.shape().dims() == 1) && (output_shape.dim_size(0) == 3),
+                errors::InvalidArgument("output_shape must be an 1-D vector of (height, width, depth)"));
+      const auto shape_vec = output_shape.vec<int32>();
+      input_rows = shape_vec(0);
+      input_cols = shape_vec(1);
+      input_depths = shape_vec(2);
+
+      OP_REQUIRES(ctx, images.dim_size(4) == output_channels,
+                errors::InvalidArgument("images channel size wrong"));
+    } else {
+      input_batches = images.dim_size(0);
+      input_rows = images.dim_size(1);
+      input_cols = images.dim_size(2);
+      input_depths = images.dim_size(3);
+
+      OP_REQUIRES(ctx, images.dim_size(4) == input_channels,
+                errors::InvalidArgument("images channel size wrong"));
+    }
 
     int64 output_rows, output_cols, output_depths;
     int64 padding_rows, padding_cols, padding_depths;
-    int64 padding_after_dummy;
-    if(is_transpose){
-      output_rows = input_rows * strides[0];
-      output_cols = input_cols * strides[1];
-      output_depths = input_depths * strides[2];
 
-      padding_rows = p.filter_rows/2 * p.dilation_rows;
-      padding_cols = p.filter_cols/2 * p.dilation_cols;
-      padding_depths = p.filter_depths/2 * p.dilation_depths;
+    output_rows = (input_rows + strides[0] - 1)/strides[0];
+    output_cols = (input_cols + strides[1] - 1)/strides[1];
+    output_depths = (input_depths + strides[2] - 1)/strides[2];
+    padding_rows = filter_rows/2*dilations[0];
+    padding_cols = filter_cols/2*dilations[1];
+    padding_depths = filter_depths/2*dilations[2];
 
-      OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == input_batches)
-                      && (base_plane.dim_size(1) == output_rows) && (base_plane.dim_size(2) == output_cols) && (base_plane.dim_size(3) == 1),
-                errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image, got ", base_plane.shape().DebugString()));
-    } else {
-      OP_REQUIRES_OK(
-        ctx, GetWindowedOutputSizeVerboseV2(input_rows, filter_rows, dilations[0],
-                                         strides[0], Padding::SAME, &output_rows,
-                                         &padding_after_dummy, &padding_rows));
-      OP_REQUIRES_OK(
-          ctx, GetWindowedOutputSizeVerboseV2(input_cols, filter_cols, dilations[1],
-                                          strides[1], Padding::SAME, &output_cols,
-                                          &padding_after_dummy, &padding_cols));
-
-      OP_REQUIRES_OK(
-          ctx, GetWindowedOutputSizeVerboseV2(input_depths, filter_depths, dilations[2],
-                                          strides[2], Padding::SAME, &output_depths,
-                                          &padding_after_dummy, &padding_depths));
-
-      OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == input_batches)
+    OP_REQUIRES(ctx, (base_plane.shape().dims() == 4) && (base_plane.dim_size(0) == input_batches)
                       && (base_plane.dim_size(1) == input_rows) && (base_plane.dim_size(2) == input_cols) && (base_plane.dim_size(3) == 1),
                 errors::InvalidArgument("base_plane must have rank 4, and must compate to ref_image, got ", base_plane.shape().DebugString()));
-    }
 
+
+
+    if(is_transpose){
+      OP_REQUIRES(ctx, (images.dim_size(1) == output_rows) && (images.dim_size(2) == output_cols) && (images.dim_size(3) == output_depths),
+                errors::InvalidArgument("images shape and output_shape does not compate, got ", images.shape().DebugString()));
+    }
 
     // std::cout << "##" <<  output_rows << " " << output_cols << " " << output_depths << std::endl;
     // std::cout << "##" <<  padding_rows << " " << padding_cols << " " << padding_depths << std::endl;
@@ -310,6 +316,11 @@ class SparseConv3DFastGradOp : public SparseConv3DFastOpBase<Device, T> {
     std::swap(grad_p.input_rows, grad_p.output_rows);
     std::swap(grad_p.input_cols, grad_p.output_cols);
     std::swap(grad_p.input_depths, grad_p.output_depths);
+
+    /* left padding to right padding */
+    grad_p.padding_rows = (grad_p.filter_rows - 1)*grad_p.dilation_rows - grad_p.padding_rows;
+    grad_p.padding_cols = (grad_p.filter_cols - 1)*grad_p.dilation_cols - grad_p.padding_cols;
+    grad_p.padding_depths = (grad_p.filter_depths - 1)*grad_p.dilation_depths - grad_p.padding_depths;
     SparseConv3DFastFunctor<Device, T, false>()(ctx->eigen_device<Device>(), grad_p,
                                           out_grad.tensor<T, 5>().data(),
                                           filter_transposed.tensor<T, 5>().data(), 
@@ -354,6 +365,13 @@ class SparseConv3DTransposeFastOp : public SparseConv3DFastOpBase<Device, T> {
     const Tensor& default_channels_value = ctx->input(2);
     const Tensor& base_plane = ctx->input(3);
 
+    Tensor *output;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            0,
+                            TensorShape({p.input_batches, p.input_rows, p.input_cols, p.input_depths, p.input_channels}),
+                            &output));
+
+
     Tensor filter_transposed;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(
         DataTypeToEnum<T>::value,
@@ -361,17 +379,28 @@ class SparseConv3DTransposeFastOp : public SparseConv3DFastOpBase<Device, T> {
                      p.filter_rows, p.filter_cols, p.filter_depths, p.input_channels}),
         &filter_transposed));
 
-    Tensor *output;
-    OP_REQUIRES_OK(ctx, ctx->allocate_output(
-                            0,
-                            TensorShape({p.input_batches, p.output_rows, p.output_cols, p.output_depths, p.output_channels}),
-                            &output));
+    Tensor zero_default;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(
+        DataTypeToEnum<T>::value,
+        default_channels_value.shape(),
+        &zero_default));
 
-    
-    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {4, 0, 1, 2, 3}, 
-                                                                    {false, false, false, false, false}, &filter_transposed);
+    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {3, 0, 1, 2, 4}, 
+                                                                    {true, true, true, false, false}, &filter_transposed);
+    TensorSetZero<Device, T>(ctx, &zero_default);
 
-    SparseConv3DFastFunctor<Device, T, true>()(ctx->eigen_device<Device>(), p,
+    SparseConv3DFastParams grad_p = p;
+    std::swap(grad_p.input_channels, grad_p.output_channels);
+    std::swap(grad_p.input_rows, grad_p.output_rows);
+    std::swap(grad_p.input_cols, grad_p.output_cols);
+    std::swap(grad_p.input_depths, grad_p.output_depths);
+
+    /* left padding to right padding */
+    grad_p.padding_rows = (grad_p.filter_rows - 1)*grad_p.dilation_rows - grad_p.padding_rows;
+    grad_p.padding_cols = (grad_p.filter_cols - 1)*grad_p.dilation_cols - grad_p.padding_cols;
+    grad_p.padding_depths = (grad_p.filter_depths - 1)*grad_p.dilation_depths - grad_p.padding_depths;
+
+    SparseConv3DFastFunctor<Device, T, false>()(ctx->eigen_device<Device>(), grad_p,
                                           images.tensor<T, 5>().data(),
                                           filter_transposed.tensor<T, 5>().data(), 
                                           default_channels_value.flat<T>().data(),
@@ -388,7 +417,8 @@ private:
 #define REGISTER(TYPE)                                              \
   REGISTER_KERNEL_BUILDER(Name("SparseConv3DTransposeFast") \
                               .Device(DEVICE_GPU)                   \
-                              .TypeConstraint<TYPE>("dtype"),        \
+                              .TypeConstraint<TYPE>("dtype")        \
+                              .HostMemory("output_shape"),                 \
                           SparseConv3DTransposeFastOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
@@ -505,7 +535,8 @@ typedef Eigen::GpuDevice GPUDevice;
 #define REGISTER(TYPE)                                              \
   REGISTER_KERNEL_BUILDER(Name("SparseConv3DTransposeFastGrad") \
                               .Device(DEVICE_GPU)                   \
-                              .TypeConstraint<TYPE>("dtype"),        \
+                              .TypeConstraint<TYPE>("dtype")        \
+                              .HostMemory("output_shape"),                 \
                           SparseConv3DTransposeFastGradOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);

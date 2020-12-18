@@ -134,9 +134,9 @@ def create_build_configuration():
 
 def configure_cuda():
     write_action_env("TF_NEED_CUDA", "1")
-    write_action_env(
-        "CUDA_TOOLKIT_PATH", os.getenv("CUDA_TOOLKIT_PATH", "/usr/local/cuda")
-    )
+    # write_action_env(
+    #     "CUDA_TOOLKIT_PATH", os.getenv("CUDA_TOOLKIT_PATH", "/usr/local/cuda")
+    # )
     write_action_env(
         "CUDNN_INSTALL_PATH",
         os.getenv("CUDNN_INSTALL_PATH", "/usr/lib/x86_64-linux-gnu"),
