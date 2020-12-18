@@ -18,33 +18,16 @@ makedepends=('python-setuptools' 'bazel' 'rsync' 'python-pip')
 # }
 
 prepare() {
-  export TF_ENABLE_XLA=1
-  # See https://github.com/tensorflow/tensorflow/blob/master/third_party/systemlibs/syslibs_configure.bzl
-  export TF_SYSTEM_LIBS="boringssl,curl,cython,gif,icu,libjpeg_turbo,lmdb,nasm,pcre,png,pybind11,zlib"
-  export TF_IGNORE_MAX_BAZEL_VERSION=1
-  export TF_MKL_ROOT=/opt/intel/mkl
-  export GCC_HOST_COMPILER_PATH=/usr/bin/gcc
-  export HOST_C_COMPILER=/usr/bin/gcc
-  export HOST_CXX_COMPILER=/usr/bin/g++
-  export TF_CUDA_CLANG=0  # Clang currently disabled because it's not compatible at the moment.
-  export CLANG_CUDA_COMPILER_PATH=/usr/bin/clang
-  export TF_CUDA_PATHS=/opt/cuda,/usr/lib,/usr
-  export TF_CUDA_VERSION=$(/opt/cuda/bin/nvcc --version | sed -n 's/^.*release \(.*\),.*/\1/p')
-  export TF_CUDNN_VERSION=$(sed -n 's/^#define CUDNN_MAJOR\s*\(.*\).*/\1/p' /usr/include/cudnn_version.h)
-  export TF_CUDA_COMPUTE_CAPABILITIES=5.2,5.3,6.0,6.1,6.2,7.0,7.2,7.5,8.0,8.6
-
-  # Required until https://github.com/tensorflow/tensorflow/issues/39467 is fixed.
-  export CC=gcc
-  export CXX=g++
-
-  export BAZEL_ARGS="--config=mkl -c opt --copt=-I/usr/include/openssl-1.0 --host_copt=-I/usr/include/openssl-1.0 --linkopt=-l:libssl.so.1.0.0 --linkopt=-l:libcrypto.so.1.0.0 --host_linkopt=-l:libssl.so.1.0.0 --host_linkopt=-l:libcrypto.so.1.0.0"
-
-  # Workaround for gcc 10+ warnings related to upb.
-  # See https://github.com/tensorflow/tensorflow/issues/39467
-  export BAZEL_ARGS="$BAZEL_ARGS --host_copt=-Wno-stringop-truncation"
-  export CC_OPT_FLAGS="-march=native -O3"
   export TF_NEED_CUDA=1
   export TF_CUDA_CLANG=0
+  export CUDA_TOOLKIT_PATH=/opt/cuda
+  export CUDNN_INSTALL_PATH=/usr
+  export TF_CUDA_PATHS=/opt/cuda/targets/x86_64-linux
+
+  export TF_CUDA_VERSION=$(/opt/cuda/bin/nvcc --version | sed -n 's/^.*release \(.*\),.*/\1/p')
+  export TF_CUDNN_VERSION=$(sed -n 's/^#define CUDNN_MAJOR\s*\(.*\).*/\1/p' /usr/include/cudnn.h)
+  export TF_CUDA_COMPUTE_CAPABILITIES=3.5,3.7,5.0,5.2,5.3,6.0,6.1,6.2,7.0,7.2,7.5
+
 
   rm -rf custom_helper_op
   if [ -d "../../../custom_helper_op" ]
