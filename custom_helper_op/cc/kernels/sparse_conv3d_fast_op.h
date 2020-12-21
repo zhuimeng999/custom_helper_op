@@ -51,53 +51,8 @@ struct SparseConv3DFastParams {
 template <typename Device, typename T, int NDIMS>
 struct LaunchTransposeAndReverse {
 
-static void launch(OpKernelContext *ctx, const Tensor &in,
-                 const gtl::ArraySlice<int32> perm, const gtl::ArraySlice<bool> reverse, Tensor *out)
-{
-  const auto d = ctx->template eigen_device<Device>();
-
-  Eigen::array<int, NDIMS> p;
-  bool should_shuffle = false;
-  for (int i = 0; i < NDIMS; ++i) {
-    p[i] = perm[i];
-    should_shuffle |= (i != perm[i]);
-  }
-
-  bool should_reverse = false;
-  Eigen::array<int, NDIMS> r;
-  for (int i = 0; i < NDIMS; ++i) {
-    r[i] = reverse[i];
-    should_reverse |= reverse[i];
-  }
-
-  auto x = typename TTypes<T, NDIMS>::ConstTensor(
-      reinterpret_cast<const T *>(in.tensor_data().data()),
-      in.shape().AsEigenDSizes<NDIMS>());
-  auto y = typename TTypes<T, NDIMS>::Tensor(
-      reinterpret_cast<T *>(const_cast<char *>(out->tensor_data().data())),
-      out->shape().AsEigenDSizes<NDIMS>());
-
-  const bool use_64bit = x.size() > Eigen::NumTraits<int>::highest();
-
-  if (!use_64bit && Eigen::internal::is_same<Device, Eigen::GpuDevice>::value) {
-    if(should_shuffle && should_reverse){
-      To32Bit(y).device(d) = To32Bit(x).reverse(r).shuffle(p);
-    } else if(should_shuffle) {
-      To32Bit(y).device(d) = To32Bit(x).shuffle(p);
-    } else if(should_reverse) {
-      To32Bit(y).device(d) = To32Bit(x).reverse(p);
-    }
-
-  } else {
-    if(should_shuffle && should_reverse){
-      y.device(d) = x.reverse(r).shuffle(p);
-    } else if(should_shuffle) {
-      y.device(d) = x.shuffle(p);
-    } else if(should_reverse) {
-      y.device(d) = x.reverse(p);
-    }
-  }
-}
+bool operator()(OpKernelContext *ctx, const Tensor &in,
+                 const gtl::ArraySlice<int32> perm, const gtl::ArraySlice<bool> reverse, Tensor *out);
 };
 
 namespace functor {

@@ -8,6 +8,9 @@
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 #include "custom_helper_op/cc/kernels/sparse_conv3d_fast_op.h"
 // #include "gpu/cub/device/device_reduce.cuh"
+#include "tensorflow/core/kernels/conv_2d.h"
+#include "tensorflow/core/kernels/conv_2d_gpu.h"
+#include "tensorflow/core/kernels/transpose_functor.h"
 
 #if defined(CUB_PTX_WARP_THREADS)
   # define CUDA_WARP_SIZE CUB_PTX_WARP_THREADS
@@ -17,8 +20,97 @@
 namespace tensorflow {
 namespace custom_helper_op {
 
+template <typename Device, typename T, int NDIMS>
+bool LaunchTransposeAndReverse<Device, T, NDIMS>::operator()(OpKernelContext *ctx, const Tensor &in,
+                 const gtl::ArraySlice<int32> perm, const gtl::ArraySlice<bool> reverse, Tensor *out)
+{
+  const auto d = ctx->template eigen_device<Device>();
+  tensorflow::internal::TransposePermsVec new_perm;
+  tensorflow::internal::TransposeDimsVec new_dims;
+  tensorflow::internal::ReduceTransposeDimensions(in.shape(), perm, &new_perm, &new_dims);
+
+  Eigen::array<int, NDIMS> p;
+  bool should_shuffle = false;
+  for (int i = 0; i < NDIMS; ++i) {
+    p[i] = perm[i];
+    should_shuffle |= (i != perm[i]);
+  }
+
+  bool should_reverse = false;
+  Eigen::array<int, NDIMS> r;
+  for (int i = 0; i < NDIMS; ++i) {
+    r[i] = reverse[i];
+    should_reverse |= reverse[i];
+  }
+
+  auto x = typename TTypes<T, NDIMS>::ConstTensor(
+      reinterpret_cast<const T *>(in.tensor_data().data()),
+      in.shape().AsEigenDSizes<NDIMS>());
+  auto y = typename TTypes<T, NDIMS>::Tensor(
+      reinterpret_cast<T *>(const_cast<char *>(out->tensor_data().data())),
+      out->shape().AsEigenDSizes<NDIMS>());
+
+  const bool use_64bit = x.size() > Eigen::NumTraits<int>::highest();
+
+  if (!use_64bit && Eigen::internal::is_same<Device, Eigen::GpuDevice>::value) {
+    if(should_reverse) {
+      To32Bit(y).device(d) = To32Bit(x).reverse(r);
+    }
+  } else {
+    if(should_reverse) {
+      y.device(d) = x.reverse(r);
+    }
+  }
+  if(should_shuffle){
+    TransposePermsVec new_perm;
+    TransposeDimsVec new_dims;
+    tensorflow::internal::ReduceTransposeDimensions(in.shape(), perm, &new_perm, &new_dims);
+
+    // Only use special GPU kernel when dimension is 2 or 3.
+    int dims = new_dims.size();
+    if (dims < 2 || dims > 3) return false;
+    auto in_data = reinterpret_cast<const T*>(in.tensor_data().data());
+    auto out_data =
+        reinterpret_cast<T*>(const_cast<char*>(out->tensor_data().data()));
+    switch (dims) {
+      case 2:
+        if (new_perm[0] == 1 && new_perm[1] == 0) {
+          // Add the first dimension size as 1.
+          new_dims.insert(new_dims.begin(), 1);
+          tensorflow::functor::SwapDimension1And2InTensor3<GPUDevice, T,
+                                                           conjugate>()(
+              d, in_data, new_dims, out_data);
+          return true;
+        }
+        break;
+      case 3:
+        if (new_perm == TransposePermsVec({0, 2, 1})) {
+          tensorflow::functor::SwapDimension1And2InTensor3<GPUDevice, T,
+                                                           conjugate>()(
+              d, in_data, new_dims, out_data);
+          return true;
+        } else if (new_perm == TransposePermsVec({2, 1, 0})) {
+          tensorflow::functor::SwapDimension0And2InTensor3<GPUDevice, T,
+                                                           conjugate>()(
+              d, in_data, new_dims, out_data);
+          return true;
+        } else {
+          // do not handle other 3D permutations
+          return false;
+        }
+        break;
+      default:
+        return false;
+    }
+    return false;
+  }
+  }
+  return true;
+}
+
 template struct LaunchTransposeAndReverse<Eigen::GpuDevice, float, 5>;
 template struct LaunchTransposeAndReverse<Eigen::GpuDevice, double, 5>;
+
 namespace functor {
 #define CHECK_PADDING(a, b) (static_cast<unsigned int>(a) >= static_cast<unsigned int>(b))
 
@@ -333,7 +425,6 @@ __global__ void SparseConv3DFastFilterGradKernel(const int32 count, const Sparse
     row = row * p.dilation_rows - p.padding_rows;
     depth = depth * p.dilation_depths - p.padding_depths;
     
-    int image_index_offset = (row * p.input_cols+ col)*p.input_depths + depth;
     T filter_grad = T(0.);
     for(int j = out_id_in_step; j < image_step; j += d_step){
       int im_d = j % p.output_depths;
@@ -341,13 +432,30 @@ __global__ void SparseConv3DFastFilterGradKernel(const int32 count, const Sparse
       int im_r = j / p.output_depths / p.output_cols % p.output_rows;
       int im_n = j / p.output_depths / p.output_cols / p.output_rows;
       
-      int out_d = ldg(base_plane_data + (im_n*p.input_rows + im_r * p.stride_rows)*p.input_cols+im_c * p.stride_cols);
-      im_r = im_r * p.stride_rows + row;
-      im_c = im_c * p.stride_cols + col;
-      im_d = (im_d + (out_d + p.stride_depths - 1)/p.stride_depths) * p.stride_depths + depth 
-                                          - ldg(base_plane_data + (im_n*p.input_rows + im_r)*p.input_cols+im_c);
-      
-      bool is_padding = CHECK_PADDING(im_r, p.input_rows) | CHECK_PADDING(im_c, p.input_cols) | CHECK_PADDING(im_d, p.input_depths);
+      bool is_padding;
+      if(strideOnOutput){
+        int out_d = ldg(base_plane_data + (im_n*p.input_rows + im_r * p.stride_rows)*p.input_cols+im_c * p.stride_cols);
+        im_r = im_r * p.stride_rows + row;
+        im_c = im_c * p.stride_cols + col;
+        im_d = (im_d + (out_d + p.stride_depths - 1)/p.stride_depths) * p.stride_depths + depth 
+                                            - ldg(base_plane_data + (im_n*p.input_rows + im_r)*p.input_cols+im_c);
+        is_padding = (CHECK_PADDING(im_r, p.input_rows) | CHECK_PADDING(im_c, p.input_cols) | CHECK_PADDING(im_d, p.input_depths));
+      } else {
+        int out_d = ldg(base_plane_data + (im_n*p.output_rows + im_r)*p.output_cols+im_c);
+        im_r = im_r + row;
+        im_c = im_c + col;
+        im_d = im_d + depth + out_d;
+        is_padding = ((im_r % p.stride_rows) != 0) | ((im_c % p.stride_cols) != 0) | ((im_d % p.stride_depths) != 0);
+        int32 depth_index = (im_n*p.output_rows + im_r)*p.output_cols+im_c;
+
+        im_r = im_r/p.stride_rows;
+        im_c = im_c/p.stride_cols;
+        is_padding |= (CHECK_PADDING(im_r, p.input_rows) | CHECK_PADDING(im_c, p.input_cols));
+        if(!is_padding){
+          im_d = (im_d/p.stride_depths) - (ldg(base_plane_data + depth_index) + p.stride_depths - 1)/p.stride_depths ;
+          is_padding = CHECK_PADDING(im_d, p.input_depths);
+        }
+      }
 
       T filter_grad_factor = default_value;
       if( is_padding ){

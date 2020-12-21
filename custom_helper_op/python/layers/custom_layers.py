@@ -118,7 +118,7 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
         
         dynamic_default = self.default_value.trainable
             
-        out = sparse_conv3d_fast(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
+        out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
         if self.use_bias:
             out =  tf.nn.bias_add(out, self.bias)
         return out

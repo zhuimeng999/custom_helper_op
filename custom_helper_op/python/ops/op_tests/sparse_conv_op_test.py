@@ -103,8 +103,8 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     )
     def testForward(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
         tf.random.set_seed(np.random.randint(1, tf.int64.max))
-        images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
-        filters = tf.random.uniform([KERNEL_SIZE[0], KERNEL_SIZE[1], KERNEL_SIZE[2], IN_CHANNELS, OUT_CHANNELS], dtype=tf.float64)
+        images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float32)
+        filters = tf.random.uniform([KERNEL_SIZE[0], KERNEL_SIZE[1], KERNEL_SIZE[2], IN_CHANNELS, OUT_CHANNELS], dtype=images_all.dtype)
         base_plane = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], minval=0, maxval=(VIRTUAL_DEPTH - IMAGE_DEPTH), dtype=tf.int32)
         # base_plane = (base_plane//2)*2
         # test_start_d = 5
@@ -139,7 +139,7 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
         # print(res[:, half_kernel[0], half_kernel[1],  half_kernel[2], :])
         # print(res_nn[:, half_kernel[0], half_kernel[1], half_kernel[2], :])
         self.assertShapeEqual(res.numpy(), res_nn)
-        self.assertAllClose(res, res_nn)
+        self.assertAllClose(res, res_nn, rtol=1e-5)
 
         sc3d = SparseConv3DLayer(3, (3, 3, 3), dtype=images.dtype)
         sc3d([images, base_plane])
@@ -199,8 +199,8 @@ class SparseConv3DTest(test.TestCase, parameterized.TestCase):
     def testGradientFloat64(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
         test_strides = (1, 1, 1)
         tf.random.set_seed(np.random.randint(1, tf.int64.max))
-        images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
-        filters = tf.random.uniform([KERNEL_SIZE[0], KERNEL_SIZE[1], KERNEL_SIZE[2], IN_CHANNELS, OUT_CHANNELS], dtype=tf.float64)
+        images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float32)
+        filters = tf.random.uniform([KERNEL_SIZE[0], KERNEL_SIZE[1], KERNEL_SIZE[2], IN_CHANNELS, OUT_CHANNELS], dtype=images_all.dtype)
         base_plane = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], minval=0, maxval=(VIRTUAL_DEPTH - IMAGE_DEPTH), dtype=tf.int32)
         # test_start_d = 5
         # base_plane = tf.ones([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1], dtype=tf.int32) * test_start_d
