@@ -175,7 +175,7 @@ class SparseConv3DFastOp : public SparseConv3DFastOpBase<Device, T> {
   }
 
   void Compute(OpKernelContext* ctx) override {
-    SparseConv3DFastOpBase<Device, T>::Compute(ctx);
+    // SparseConv3DFastOpBase<Device, T>::Compute(ctx);
 
     const Tensor& images = ctx->input(0);
     const Tensor& filter = ctx->input(1);
@@ -352,6 +352,7 @@ TF_CALL_double(REGISTER);
 template <typename Device, typename T>
 class SparseConv3DTransposeFastOp : public SparseConv3DFastOpBase<Device, T> {
   using SparseConv3DFastOpBase<Device, T>::p;
+  using SparseConv3DFastOpBase<Device, T>::data_format;
  public:
   explicit SparseConv3DTransposeFastOp(OpKernelConstruction* ctx)
       : SparseConv3DFastOpBase<Device, T>(ctx, true) {
@@ -365,12 +366,12 @@ class SparseConv3DTransposeFastOp : public SparseConv3DFastOpBase<Device, T> {
     const Tensor& default_channels_value = ctx->input(2);
     const Tensor& base_plane = ctx->input(3);
 
+
     Tensor *output;
     OP_REQUIRES_OK(ctx, ctx->allocate_output(
                             0,
                             TensorShape({p.input_batches, p.input_rows, p.input_cols, p.input_depths, p.input_channels}),
                             &output));
-
 
     Tensor filter_transposed;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(
@@ -418,7 +419,7 @@ private:
   REGISTER_KERNEL_BUILDER(Name("SparseConv3DTransposeFast") \
                               .Device(DEVICE_GPU)                   \
                               .TypeConstraint<TYPE>("dtype")        \
-                              .HostMemory("output_shape"),                 \
+                              .HostMemory("output_size"),                 \
                           SparseConv3DTransposeFastOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);
@@ -443,12 +444,12 @@ class SparseConv3DTransposeFastGradOp : public SparseConv3DFastOpBase<Device, T>
     const Tensor& default_channels_value = ctx->input(2);
     const Tensor& base_plane = ctx->input(3);
 
-    const Tensor& out_grad = ctx->input(4);
+    const Tensor& out_grad = ctx->input(5);
 
     // std::cout << p.input_batches << " " << p.output_rows << " " << p.output_cols << " " << p.output_depths << " " << p.output_channels << std::endl;
     OP_REQUIRES(ctx, (out_grad.shape().dims() == 5) && (out_grad.dim_size(0) == p.input_batches)
-                      && (out_grad.dim_size(1) == p.output_rows) && (out_grad.dim_size(2) == p.output_cols) && (out_grad.dim_size(3) == p.output_depths)
-                      && (out_grad.dim_size(4) == p.output_channels),
+                      && (out_grad.dim_size(1) == p.input_rows) && (out_grad.dim_size(2) == p.input_cols) && (out_grad.dim_size(3) == p.input_depths)
+                      && (out_grad.dim_size(4) == p.input_channels),
                 errors::InvalidArgument("out_grad must have rank 5, and must compate to ref_image, got ", out_grad.shape().DebugString()));
 
     Tensor *images_grad;
@@ -461,37 +462,6 @@ class SparseConv3DTransposeFastGradOp : public SparseConv3DFastOpBase<Device, T>
                             1,
                             filter.shape(),
                             &filter_grad));
-    Tensor *default_channels_value_grad;
-    OP_REQUIRES_OK(ctx, ctx->allocate_output(
-                              2,
-                              default_channels_value.shape(),
-                              &default_channels_value_grad));
-
-
-    /*temp usage of image_grad storage */
-    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, images, {4, 0, 1, 2, 3}, 
-                                                                    {false, false, false, false, false}, images_grad);
-
-    TensorSetZero<Device, T>(ctx, default_channels_value_grad);
-    if(p.dynamic_default){
-      SparseConv3DFastFilterGradFunctor<Device, T, false, true>()(ctx->eigen_device<Device>(), p,
-                                            images_grad->tensor<T, 5>().data(),
-                                            filter.tensor<T, 5>().data(), 
-                                            default_channels_value.flat<T>().data(),
-                                            base_plane.tensor<int32, 4>().data(),
-                                            out_grad.tensor<T, 5>().data(),
-                                            filter_grad->tensor<T, 5>().data(),
-                                            default_channels_value_grad->flat<T>().data());
-    } else {
-      SparseConv3DFastFilterGradFunctor<Device, T, false, false>()(ctx->eigen_device<Device>(), p,
-                                            images_grad->tensor<T, 5>().data(),
-                                            filter.tensor<T, 5>().data(), 
-                                            default_channels_value.flat<T>().data(),
-                                            base_plane.tensor<int32, 4>().data(),
-                                            out_grad.tensor<T, 5>().data(),
-                                            filter_grad->tensor<T, 5>().data(),
-                                            default_channels_value_grad->flat<T>().data());
-    }
 
 
     Tensor filter_transposed;
@@ -500,26 +470,13 @@ class SparseConv3DTransposeFastGradOp : public SparseConv3DFastOpBase<Device, T>
         TensorShape({p.output_channels,
                      p.filter_rows, p.filter_cols, p.filter_depths, p.input_channels}),
         &filter_transposed));
+    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {4, 0, 1, 2, 3}, 
+                                                                    {false, false, false, false, false}, &filter_transposed);
 
-    Tensor zero_default;
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(
-        DataTypeToEnum<T>::value,
-        default_channels_value.shape(),
-        &zero_default));
-
-    LaunchTransposeAndReverse<Device, T, 5>::launch(ctx, filter, {3, 0, 1, 2, 4}, 
-                                                                    {true, true, true, false, false}, &filter_transposed);
-    TensorSetZero<Device, T>(ctx, &zero_default);
-
-    SparseConv3DFastParams grad_p = p;
-    std::swap(grad_p.input_channels, grad_p.output_channels);
-    std::swap(grad_p.input_rows, grad_p.output_rows);
-    std::swap(grad_p.input_cols, grad_p.output_cols);
-    std::swap(grad_p.input_depths, grad_p.output_depths);
-    SparseConv3DFastFunctor<Device, T, false>()(ctx->eigen_device<Device>(), grad_p,
+    SparseConv3DFastFunctor<Device, T, true>()(ctx->eigen_device<Device>(), p,
                                           out_grad.tensor<T, 5>().data(),
                                           filter_transposed.tensor<T, 5>().data(), 
-                                          zero_default.flat<T>().data(),
+                                          default_channels_value.flat<T>().data(),
                                           base_plane.tensor<int32, 4>().data(),
                                           images_grad->tensor<T, 5>().data());
 
@@ -536,7 +493,7 @@ typedef Eigen::GpuDevice GPUDevice;
   REGISTER_KERNEL_BUILDER(Name("SparseConv3DTransposeFastGrad") \
                               .Device(DEVICE_GPU)                   \
                               .TypeConstraint<TYPE>("dtype")        \
-                              .HostMemory("output_shape"),                 \
+                              .HostMemory("output_size"),                 \
                           SparseConv3DTransposeFastGradOp<GPUDevice, TYPE>)
 
 TF_CALL_float(REGISTER);

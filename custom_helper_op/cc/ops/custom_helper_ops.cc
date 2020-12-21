@@ -646,7 +646,7 @@ REGISTER_OP("SparseConv3DTransposeFast")
     .Input("filters: dtype")
     .Input("default_value: dtype")
     .Input("base_plane: int32")
-    .Input("output_shape: int32")
+    .Input("output_size: int32")
     .Output("output: dtype")
     .Attr("dtype: {float, double}")
     .Attr("strides: list(int)")
@@ -664,7 +664,7 @@ REGISTER_OP("SparseConv3DTransposeFast")
       // auto image_depth     = c->Value(c->Dim(image_shape, 3));
       // auto out_channel_num = c->Value(c->Dim(filter_shape, 4));
 
-      auto input_channel_num = c->Dim(filter_shape, 5);
+      auto input_channel_num = c->Dim(filter_shape, 3);
 
       // Get size values from the size tensor.
       const Tensor *size_tensor = c->input_tensor(4);
@@ -688,7 +688,7 @@ REGISTER_OP("SparseConv3DTransposeFast")
         input_width = c->MakeDim(vec(1));
         input_depth = c->MakeDim(vec(2));
       }
-
+      // std::cout << c->MakeShape({batch_dim, input_height, input_width, input_depth, input_channel_num}) << std::endl;
       c->set_output(0, c->MakeShape({batch_dim, input_height, input_width, input_depth, input_channel_num}));
       return Status::OK();
     });
@@ -699,7 +699,7 @@ REGISTER_OP("SparseConv3DTransposeFastGrad")
     .Input("filters: dtype")
     .Input("default_value: dtype")
     .Input("base_plane: int32")
-    .Input("output_shape: int32")
+    .Input("output_size: int32")
     .Input("out_grad: dtype")
     .Output("images_grad: dtype")
     .Output("filter_grad: dtype")

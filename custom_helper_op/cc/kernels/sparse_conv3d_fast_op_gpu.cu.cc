@@ -19,7 +19,6 @@ namespace custom_helper_op {
 
 template struct LaunchTransposeAndReverse<Eigen::GpuDevice, float, 5>;
 template struct LaunchTransposeAndReverse<Eigen::GpuDevice, double, 5>;
-
 namespace functor {
 #define CHECK_PADDING(a, b) (static_cast<unsigned int>(a) >= static_cast<unsigned int>(b))
 
@@ -401,7 +400,7 @@ __global__ void SparseConv3DFastFilterGradKernel(const int32 count, const Sparse
       offset = offset/2;
     }
     if(threadIdx.x == 0){
-      atomicAdd(default_channel_value_grad, shared_data[0]);
+      GpuAtomicAdd(default_channel_value_grad, shared_data[0]);
     }
   }
 }
