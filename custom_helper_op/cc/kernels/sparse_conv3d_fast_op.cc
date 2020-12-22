@@ -19,15 +19,10 @@
 #define EIGEN_USE_GPU
 #endif  // GOOGLE_CUDA
 
-#include "custom_helper_op/cc/kernels/deformable_conv_op.h"
 #include "custom_helper_op/cc/kernels/sparse_conv3d_fast_op.h"
 
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/framework/kernel_shape_util.h"
-
-#include "tensorflow/core/kernels/transpose_functor.h"
-
-#include "tensorflow/core/kernels/conv_2d.h"
 
 namespace tensorflow {
 namespace custom_helper_op {

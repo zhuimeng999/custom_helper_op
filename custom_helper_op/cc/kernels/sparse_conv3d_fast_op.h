@@ -48,6 +48,9 @@ struct SparseConv3DFastParams {
   bool dynamic_default;
 };
 
+template <typename Device, typename T>
+Status TensorSetZero(OpKernelContext *ctx, Tensor *value);
+
 template <typename Device, typename T, int NDIMS>
 struct LaunchTransposeAndReverse {
 

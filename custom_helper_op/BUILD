@@ -35,9 +35,6 @@ custom_op_library(
         "cc/kernels/sparse_pad_kernels.cc",
         "cc/kernels/sparse_pad.h",
 
-        "cc/kernels/deformable_conv_op.cc",
-        "cc/kernels/deformable_conv_op.h",
-
         "cc/kernels/index_initializer_kernels.cc",
         "cc/kernels/index_initializer.h",
 
@@ -71,9 +68,6 @@ custom_op_library(
 
         "cc/kernels/sparse_pad_kernels_gpu.cu.cc",
         "cc/kernels/sparse_pad.h",
-
-        "cc/kernels/deformable_conv_op_gpu.cu.cc",
-        "cc/kernels/deformable_conv_op.h",
 
         "cc/kernels/index_initializer.h",
         "cc/kernels/index_initializer_kernels_gpu.cu.cc",

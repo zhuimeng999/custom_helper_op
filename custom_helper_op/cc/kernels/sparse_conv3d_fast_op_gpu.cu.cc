@@ -17,8 +17,65 @@
 #else
   # define CUDA_WARP_SIZE 32
 #endif
+
+namespace Eigen {
+namespace internal {
+
+template <typename T>
+struct scalar_const_op {
+  typedef typename packet_traits<T>::type Packet;
+
+  const T* val;
+
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+  scalar_const_op(const scalar_const_op& x)
+      : val(x.val) {}
+
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE scalar_const_op(const T* v) : val(v) {}
+
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const T operator()() const {
+    return *val;
+  }
+
+  template <typename PacketType = Packet>
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const PacketType packetOp() const {
+    return internal::pset1<PacketType>(*val);
+  }
+};
+
+template <typename T>
+struct functor_traits<scalar_const_op<T> > {
+  enum {
+    Cost = 1,
+    PacketAccess = packet_traits<T>::Vectorizable,
+    IsRepeatable = true
+  };
+};
+
+}  // end namespace internal
+}  // end namespace Eigen
+
 namespace tensorflow {
 namespace custom_helper_op {
+
+template <typename Device, typename T>
+Status TensorSetZero(OpKernelContext *ctx, Tensor *value) {
+  const auto d = ctx->template eigen_device<Device>();
+  auto out = value->flat<T>();
+
+  const bool use_64bit = out.size() > Eigen::NumTraits<int>::highest();
+
+  if (!use_64bit && Eigen::internal::is_same<Device, Eigen::GpuDevice>::value) {
+    To32Bit(out).device(d) = To32Bit(out).constant(T(0));
+  } else {
+    out.device(d) = out.constant(T(0));
+  }
+
+  return Status::OK();
+};
+
+template Status TensorSetZero<Eigen::GpuDevice, float>(OpKernelContext *ctx, Tensor *value);
+template Status TensorSetZero<Eigen::GpuDevice, double>(OpKernelContext *ctx, Tensor *value);
 
 template <typename Device, typename T, int NDIMS>
 bool LaunchTransposeAndReverse<Device, T, NDIMS>::operator()(OpKernelContext *ctx, const Tensor &in,
