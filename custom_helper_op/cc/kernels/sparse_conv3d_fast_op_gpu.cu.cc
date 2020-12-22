@@ -178,8 +178,8 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
                                                                                           const int32* base_plane_data,
                                                                                           T * output_data) 
 {
-  // GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char, shared_memory);
-  // T *shared_data = reinterpret_cast<T*>(shared_memory);
+  GPU_DYNAMIC_SHARED_MEM_DECL(sizeof(T), unsigned char, shared_memory);
+  T *shared_data = reinterpret_cast<T*>(shared_memory);
 
   const T default_value = ldg(default_channel_value);
 
@@ -249,25 +249,26 @@ __global__ void SparseConv3DFastKernel(const SparseConv3DFastParams p, const int
       partial_sum += ldg(filter_data + out_ch*kernel_step + j) * in_data;
     }
 
-  //   shared_data[threadIdx.x] = partial_sum;
-  //   for (int offset = CUDA_WARP_SIZE/2; offset > 0; offset /= 2) {
-  // #if defined(CUDART_VERSION) && CUDART_VERSION >= 9000
-  //       __syncwarp();
-  // #endif
-  //     if((threadIdx.x % CUDA_WARP_SIZE) < offset){
-  //       shared_data[threadIdx.x] += shared_data[threadIdx.x + offset];
-  //     }
-
-  //   }
-  //   partial_sum = shared_data[threadIdx.x];
-
+    shared_data[threadIdx.x] = partial_sum;
     for (int offset = CUDA_WARP_SIZE/2; offset > 0; offset /= 2) {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 9000
-      partial_sum += __shfl_down_sync(0xFFFFFFFF, partial_sum, offset, 32);
-#else
-      partial_sum += __shfl_down(partial_sum, offset);
-#endif
+  #if defined(CUDART_VERSION) && CUDART_VERSION >= 9000
+        __syncwarp();
+  #endif
+      if((threadIdx.x % CUDA_WARP_SIZE) < offset){
+        shared_data[threadIdx.x] += shared_data[threadIdx.x + offset];
+      }
+
     }
+    __syncwarp();
+    partial_sum = shared_data[threadIdx.x];
+
+//     for (int offset = CUDA_WARP_SIZE/2; offset > 0; offset /= 2) {
+// #if defined(CUDART_VERSION) && CUDART_VERSION >= 9000
+//       partial_sum += __shfl_down_sync(0xFFFFFFFF, partial_sum, offset, 32);
+// #else
+//       partial_sum += __shfl_down(partial_sum, offset);
+// #endif
+//     }
 
     if((threadIdx.x%CUDA_WARP_SIZE) == 0){
       output_data[i] = partial_sum;
@@ -288,18 +289,18 @@ void SparseConv3DFastFunctor<Eigen::GpuDevice, T, strideOnOutput>::operator()(co
 
   int block_per_grid = 0;
   int thread_per_block = 0;
-  // CHECK_EQ(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&block_per_grid, &thread_per_block, SparseConv3DFastKernel<T>, [](int x){return x*sizeof(T);}), cudaSuccess);
-  // CHECK_GT(block_per_grid, 0);
-  // CHECK_EQ(thread_per_block%32, 0);
-
-  // TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T>, block_per_grid, 
-  //                           thread_per_block, thread_per_block*sizeof(T), d.stream(), p, loop_count, kernel_step, images_data, filter_data, default_channel_value, base_plane_data, out_data));
-  CHECK_EQ(cudaOccupancyMaxPotentialBlockSize(&block_per_grid, &thread_per_block, SparseConv3DFastKernel<T, strideOnOutput>, 0), cudaSuccess);
+  CHECK_EQ(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&block_per_grid, &thread_per_block, SparseConv3DFastKernel<T, strideOnOutput>, [](int x){return x*sizeof(T);}), cudaSuccess);
   CHECK_GT(block_per_grid, 0);
   CHECK_EQ(thread_per_block%32, 0);
 
   TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T, strideOnOutput>, block_per_grid, 
-                            thread_per_block, 0, d.stream(), p, loop_count, kernel_step, images_data, filter_data, default_channel_value, base_plane_data, out_data));
+                            thread_per_block, thread_per_block*sizeof(T), d.stream(), p, loop_count, kernel_step, images_data, filter_data, default_channel_value, base_plane_data, out_data));
+  // CHECK_EQ(cudaOccupancyMaxPotentialBlockSize(&block_per_grid, &thread_per_block, SparseConv3DFastKernel<T, strideOnOutput>, 0), cudaSuccess);
+  // CHECK_GT(block_per_grid, 0);
+  // CHECK_EQ(thread_per_block%32, 0);
+
+  // TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastKernel<T, strideOnOutput>, block_per_grid, 
+  //                           thread_per_block, 0, d.stream(), p, loop_count, kernel_step, images_data, filter_data, default_channel_value, base_plane_data, out_data));
 
 };
 
@@ -539,7 +540,7 @@ __global__ void SparseConv3DFastFilterGradKernel(const int32 count, const Sparse
     if(threadIdx.x < p.output_channels){
       filter_grad_data[filter_grad_out_channel_ptr + out_ch] = shared_data[out_ch];
     }
-    // __syncthreads(); /* ensure the shared data not modified by other quick threads */
+    __syncthreads(); /* ensure the shared data not modified by other quick threads */
   }
 
   if(dynamic_default){
