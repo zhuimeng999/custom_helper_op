@@ -2,7 +2,13 @@
 # -*- coding: UTF-8 -*-
 
 import tensorflow as tf
-from custom_helper_op.python.ops.custom_helper_ops import index_initializer, cost_aggregate, sparse_pad, sparse_conv3d, sparse_conv3d_fast, cost_volume, cost_volume_v2
+from custom_helper_op.python.ops.custom_helper_ops import (index_initializer, 
+                                                            cost_aggregate, 
+                                                            sparse_pad, 
+                                                            sparse_conv3d, 
+                                                            sparse_conv3d_fast, 
+                                                            sparse_conv3d_transpose_fast,
+                                                            cost_volume, cost_volume_v2)
 from tensorflow_addons.image import resampler
 
 class DepthProjectLayer(tf.keras.layers.Layer):
@@ -118,13 +124,13 @@ class SparseConv3DLayer(tf.keras.layers.Layer):
         
         dynamic_default = self.default_value.trainable
             
-        out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
+        out = sparse_conv3d_fast(images, self.kernel, self.default_value, base_plane, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
         if self.use_bias:
             out =  tf.nn.bias_add(out, self.bias)
         return out
 
 class SparseConv3DTransposeLayer(tf.keras.layers.Layer):
-    def __init__(self, filters, kernel_size, default_type='CONSTANT', strides=[1, 1, 1], dilations=[1, 1, 1], use_bias=False, **kwargs):
+    def __init__(self, filters, kernel_size, output_size=None, default_type='CONSTANT', strides=[1, 1, 1], dilations=[1, 1, 1], use_bias=False, **kwargs):
         super(SparseConv3DTransposeLayer, self).__init__(**kwargs)
         assert len(kernel_size) == 3
         assert len(strides) == 3
@@ -133,7 +139,7 @@ class SparseConv3DTransposeLayer(tf.keras.layers.Layer):
         assert (strides[0] > 1) or (strides[1] > 1) or (strides[2] > 1) 
         assert (dilations[0] == 1) and (dilations[1] == 1) and (dilations[2] == 1)
 
-        assert tf.is_tensor(default_type) or (isinstance(default_type, str) and (default_type in ['CONSTANT', 'DYNAMIC']))
+        assert default_type == 'CONSTANT'
 
         self.filters = filters
         self.kernel_size = kernel_size
@@ -141,11 +147,12 @@ class SparseConv3DTransposeLayer(tf.keras.layers.Layer):
         self.dilations = dilations
         self.use_bias = use_bias
         self.default_type = default_type
+        self.output_size = output_size
 
 
     def build(self, input_shape):
-        images, _ = input_shape
-        self.kernel = self.add_weight(shape=(*self.kernel_size, images[-1], self.filters),
+        image_shape, base_plane_shape = input_shape
+        self.kernel = self.add_weight(shape=(*self.kernel_size, self.filters, image_shape[-1]),
                              initializer='glorot_uniform',
                              trainable=True,
                              dtype=self.dtype,
@@ -158,20 +165,25 @@ class SparseConv3DTransposeLayer(tf.keras.layers.Layer):
                 dtype=self.dtype,
                 trainable=True)
                 
-        if tf.is_tensor(self.default_type):
-            self.default_value = self.default_type
-        else:
-            default_is_trainable = False if self.default_type == 'CONSTANT' else True
-            self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=default_is_trainable, dtype=self.dtype, name='sparse_conv3d_default')
-            
+        self.default_value = self.add_weight(shape=[], initializer='zeros', trainable=False, dtype=self.dtype, name='sparse_conv3d_default')
+        
+        assert image_shape[1] is not None
+        assert image_shape[2] is not None
+        assert image_shape[3] is not None
+        self.output_size = [base_plane_shape[1], base_plane_shape[2], image_shape[3]*self.strides[2]]
 
     def call(self, inputs, **kwargs):
-        images, base_plane = inputs
-
-        images = sparse_pad(images, base_plane, strides=self.strides, dilations=self.dilations)
+        if len(inputs) == 2:
+            images, base_plane = inputs
+            image_shape, base_plane_shape = tf.shape(images), tf.shape(base_plane)
+            output_size = [base_plane_shape[1], base_plane_shape[2], image_shape[3]*self.strides[2]]
+        else:
+            assert len(inputs) == 3
+            images, base_plane, output_size = inputs
         dynamic_default = self.default_value.trainable
-            
-        out = sparse_conv3d(images, self.kernel, self.default_value, base_plane, strides=(1, 1, 1), dilations=(1, 1, 1), dynamic_default=dynamic_default)
+        assert(dynamic_default is False)
+
+        out = sparse_conv3d_transpose_fast(images, self.kernel, self.default_value, base_plane, output_size, strides=self.strides, dilations=self.dilations, dynamic_default=dynamic_default)
         if self.use_bias:
             out =  tf.nn.bias_add(out, self.bias)
         return out

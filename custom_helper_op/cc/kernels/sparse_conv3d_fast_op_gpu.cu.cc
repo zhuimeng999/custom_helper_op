@@ -52,59 +52,51 @@ bool LaunchTransposeAndReverse<Device, T, NDIMS>::operator()(OpKernelContext *ct
 
   const bool use_64bit = x.size() > Eigen::NumTraits<int>::highest();
 
-  if (!use_64bit && Eigen::internal::is_same<Device, Eigen::GpuDevice>::value) {
-    if(should_reverse) {
-      To32Bit(y).device(d) = To32Bit(x).reverse(r);
+  if(should_reverse){
+    if (!use_64bit && Eigen::internal::is_same<Device, Eigen::GpuDevice>::value) {
+      if(should_shuffle){
+        To32Bit(y).device(d) = To32Bit(x).reverse(r).shuffle(p);
+      } else {
+        To32Bit(y).device(d) = To32Bit(x).reverse(r);
+      }
+    } else {
+      if(should_shuffle){
+        y.device(d) = x.reverse(r).shuffle(p);
+      } else{
+        y.device(d) = x.reverse(r);
+      }
     }
-  } else {
-    if(should_reverse) {
-      y.device(d) = x.reverse(r);
-    }
-  }
-  if(should_shuffle){
-    TransposePermsVec new_perm;
-    TransposeDimsVec new_dims;
+  } else if(should_shuffle){
+        // First try to reduce the dimensions of the input tensor.
+    tensorflow::internal::TransposePermsVec new_perm;
+    tensorflow::internal::TransposeDimsVec new_dims;
     tensorflow::internal::ReduceTransposeDimensions(in.shape(), perm, &new_perm, &new_dims);
 
-    // Only use special GPU kernel when dimension is 2 or 3.
-    int dims = new_dims.size();
-    if (dims < 2 || dims > 3) return false;
     auto in_data = reinterpret_cast<const T*>(in.tensor_data().data());
     auto out_data =
         reinterpret_cast<T*>(const_cast<char*>(out->tensor_data().data()));
-    switch (dims) {
-      case 2:
-        if (new_perm[0] == 1 && new_perm[1] == 0) {
-          // Add the first dimension size as 1.
-          new_dims.insert(new_dims.begin(), 1);
-          tensorflow::functor::SwapDimension1And2InTensor3<GPUDevice, T,
-                                                           conjugate>()(
+    CHECK((new_dims.size() == 2) || (new_dims.size() == 3));
+
+    if(new_dims.size() == 2){
+      CHECK((new_perm[0] == 1 && new_perm[1] == 0));
+      new_dims.insert(new_dims.begin(), 1);
+      tensorflow::functor::SwapDimension1And2InTensor3<GPUDevice, T, false>()(
               d, in_data, new_dims, out_data);
-          return true;
-        }
-        break;
-      case 3:
-        if (new_perm == TransposePermsVec({0, 2, 1})) {
-          tensorflow::functor::SwapDimension1And2InTensor3<GPUDevice, T,
-                                                           conjugate>()(
+    } else if(new_perm == tensorflow::internal::TransposePermsVec({0, 2, 1})) {
+      tensorflow::functor::SwapDimension1And2InTensor3<GPUDevice, T, false>()(
               d, in_data, new_dims, out_data);
-          return true;
-        } else if (new_perm == TransposePermsVec({2, 1, 0})) {
-          tensorflow::functor::SwapDimension0And2InTensor3<GPUDevice, T,
-                                                           conjugate>()(
+    } else if(new_perm == tensorflow::internal::TransposePermsVec({2, 1, 0})){
+      tensorflow::functor::SwapDimension0And2InTensor3<GPUDevice, T, false>()(
               d, in_data, new_dims, out_data);
-          return true;
-        } else {
-          // do not handle other 3D permutations
-          return false;
-        }
-        break;
-      default:
-        return false;
+    } else {
+      if (!use_64bit && Eigen::internal::is_same<Device, Eigen::GpuDevice>::value) {
+        To32Bit(y).device(d) = To32Bit(x).shuffle(p);
+      } else {
+        y.device(d) = x.shuffle(p);
+      }
     }
-    return false;
   }
-  }
+
   return true;
 }
 

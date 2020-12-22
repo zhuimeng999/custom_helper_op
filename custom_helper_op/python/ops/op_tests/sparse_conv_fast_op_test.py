@@ -30,8 +30,8 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
         depth_factor = 2
         out_depth = IMAGE_DEPTH*depth_factor
         # tf.random.set_seed(np.random.randint(0, tf.int64.max))
-        # test_strides = (2, 2, 2)
-        test_strides = (1, 1, 1)
+        test_strides = (2, 2, 2)
+        # test_strides = (1, 1, 1)
 
         in_shape = np.array((IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH))
         out_shape = (in_shape + np.array(test_strides) - 1)//np.array(test_strides)
@@ -67,12 +67,12 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
         nn_time = time.time() - start
 
 
-
+        # print(res_nn)
         strided_base_plane = base_plane[:, 0::test_strides[0], 0::test_strides[1], :]
         strided_base_plane = (strided_base_plane + test_strides[2] - 1)//test_strides[2]
         gather_indice = strided_base_plane + np.arange(0, (IMAGE_DEPTH + test_strides[2] - 1)//test_strides[2], dtype=np.int32)[None, None, None, :]
         res_nn = tf.gather_nd(res_nn, gather_indice[..., None], batch_dims=3)
-        # print(tf.shape(res), tf.shape(res_nn), tf.shape(gather_indice))
+        # print(gather_indice)
         # print(res, res_nn)
         # print(images_all, base_plane, filters)
         # print("my ", my_time/1000, " nn ", nn_time/1000)
@@ -91,7 +91,7 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
       (3, 4, 6, 4, 8, 2, 3, (2, 2, 1), (2, 2, 2)),
     )
     def testGradientFloat64(self, BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH, VIRTUAL_DEPTH, IN_CHANNELS, OUT_CHANNELS, KERNEL_SIZE, DILATIONS_SIZE):
-        test_strides = (1, 1, 1)
+        test_strides = (2, 2, 2)
 
         tf.random.set_seed(np.random.randint(0, tf.int64.max))
         images_all = tf.random.uniform([BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, VIRTUAL_DEPTH, IN_CHANNELS], dtype=tf.float64)
@@ -140,7 +140,7 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
         depth_factor = 2
         out_depth = IMAGE_DEPTH*depth_factor
         # tf.random.set_seed(np.random.randint(0, tf.int64.max))
-        test_strides = (2, 2, 2)
+        test_strides = (1, 1, 1)
 
         in_shape = np.array((IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH))
         out_shape = (in_shape + np.array(test_strides) - 1)//np.array(test_strides)
@@ -207,7 +207,7 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
         depth_factor = 2
         out_depth = IMAGE_DEPTH*depth_factor
         # tf.random.set_seed(np.random.randint(0, tf.int64.max))
-        test_strides = (2, 2, 2)
+        test_strides = (1, 1, 1)
 
         in_shape = np.array((IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_DEPTH))
         out_shape = (in_shape + np.array(test_strides) - 1)//np.array(test_strides)
