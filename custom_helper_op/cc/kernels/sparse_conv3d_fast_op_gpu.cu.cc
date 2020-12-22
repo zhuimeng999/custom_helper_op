@@ -579,7 +579,7 @@ void SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, T, strideOnOutput, dyna
   CHECK_EQ(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&block_per_grid, &thread_per_block, SparseConv3DFastFilterGradKernel<T, strideOnOutput, dynamic_default>, [](int x)->int{return x*sizeof(T);}), cudaSuccess);
   CHECK_GT(block_per_grid, 0);
   CHECK_GT(thread_per_block, p.output_channels);
-  CHECK_EQ(thread_per_block, 1024);
+  // CHECK_EQ(thread_per_block, 1024);
   thread_per_block = thread_per_block/p.output_channels*p.output_channels;
 
   TF_CHECK_OK(GpuLaunchKernel(SparseConv3DFastFilterGradKernel<T, strideOnOutput, dynamic_default>, block_per_grid, thread_per_block, thread_per_block*sizeof(T), d.stream(), 
