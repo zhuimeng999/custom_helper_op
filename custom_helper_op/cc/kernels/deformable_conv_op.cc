@@ -35,6 +35,15 @@ using GPUDevice = Eigen::GpuDevice;
 
 #if GOOGLE_CUDA
 #define EXTERN_TEMPLATE(T)                           \
+  extern template Status TensorSetZero<GPUDevice, T>( \
+      OpKernelContext * ctx, Tensor *out);
+TF_CALL_float(EXTERN_TEMPLATE);
+TF_CALL_double(EXTERN_TEMPLATE);
+#undef EXTERN_TEMPLATE
+#endif  // GOOGLE_CUDA
+
+#if GOOGLE_CUDA
+#define EXTERN_TEMPLATE(T)                           \
   extern template Status Transpose<GPUDevice, T, 5>( \
       OpKernelContext * ctx, const Tensor &in,       \
       const gtl::ArraySlice<int32> perm, Tensor *out);

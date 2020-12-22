@@ -21,10 +21,56 @@
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 #include "custom_helper_op/cc/kernels/deformable_conv_op.h"
 
+namespace Eigen {
+namespace internal {
+
+template <typename T>
+struct scalar_const_op {
+  typedef typename packet_traits<T>::type Packet;
+
+  const T* val;
+
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
+  scalar_const_op(const scalar_const_op& x)
+      : val(x.val) {}
+
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE scalar_const_op(const T* v) : val(v) {}
+
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const T operator()() const {
+    return *val;
+  }
+
+  template <typename PacketType = Packet>
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE const PacketType packetOp() const {
+    return internal::pset1<PacketType>(*val);
+  }
+};
+
+template <typename T>
+struct functor_traits<scalar_const_op<T> > {
+  enum {
+    Cost = 1,
+    PacketAccess = packet_traits<T>::Vectorizable,
+    IsRepeatable = true
+  };
+};
+
+}  // end namespace internal
+}  // end namespace Eigen
+
 namespace tensorflow {
 namespace custom_helper_op {
 
 using GPUDevice = Eigen::GpuDevice;
+
+#if GOOGLE_CUDA
+#define EXTERN_TEMPLATE(T)                           \
+  template Status TensorSetZero<GPUDevice, T>( \
+      OpKernelContext * ctx, Tensor *out);
+TF_CALL_float(EXTERN_TEMPLATE);
+TF_CALL_double(EXTERN_TEMPLATE);
+#undef EXTERN_TEMPLATE
+#endif  // GOOGLE_CUDA
 
 namespace functor {
 
