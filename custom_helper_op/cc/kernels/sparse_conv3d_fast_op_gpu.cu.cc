@@ -7,6 +7,7 @@
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/util/gpu_kernel_helper.h"
 #include "custom_helper_op/cc/kernels/sparse_conv3d_fast_op.h"
+#include "custom_helper_op/cc/kernels/sparse_conv3d_fast_fixed_param_op.h"
 // #include "gpu/cub/device/device_reduce.cuh"
 #include "tensorflow/core/kernels/conv_2d.h"
 #include "tensorflow/core/kernels/conv_2d_gpu.h"
@@ -541,9 +542,9 @@ __global__ void SparseConv3DFastFilterGradKernel(const int32 count, const Sparse
       offset = offset/2;
     }
     if(threadIdx.x < p.output_channels){
-      filter_grad_data[filter_grad_out_channel_ptr + out_ch] = shared_data[out_ch];
+      filter_grad_data[filter_grad_out_channel_ptr + threadIdx.x] = shared_data[threadIdx.x];
     }
-    __syncthreads(); /* ensure the shared data not modified by other quick threads */
+    // __syncthreads(); /* ensure the shared data not modified by other quick threads */
   }
 
   if(dynamic_default){

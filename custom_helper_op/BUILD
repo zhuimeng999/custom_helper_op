@@ -66,6 +66,9 @@ custom_op_library(
         "cc/kernels/sparse_conv3d_fast_op_gpu.cu.cc",
         "cc/kernels/sparse_conv3d_fast_op.h",
 
+        "cc/kernels/sparse_conv3d_fast_fixed_param_op_gpu.cu.cc",
+        "cc/kernels/sparse_conv3d_fast_fixed_param_op.h",
+
         "cc/kernels/sparse_pad_kernels_gpu.cu.cc",
         "cc/kernels/sparse_pad.h",
 
