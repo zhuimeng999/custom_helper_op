@@ -19,21 +19,21 @@ namespace functor {
 
 #define CHECK_PADDING(a, b) (static_cast<unsigned int>(a) >= static_cast<unsigned int>(b))
 
-#define MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
-                                                kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth, \
-                                                kKnownStrideHeight, kKnownStrideWidth, kKnownStrideDepth)
+#define MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths, \
+                                                kKnownDilationRows, kKnownDilationCols, kKnownDilationDepths, \
+                                                kKnownStrideRows, kKnownStrideCols, kKnownStrideDepths)
 
-#define EXTERN_TEMPLATE_3(T, strideOnOutput, kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
-                                    kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth) \
-          MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
-                                    kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth, 1, 1, 1) \
-          MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
-                                    kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth, 2, 2, 2) \
-          MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
-                                    kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth, 2, 2, 1)
+#define EXTERN_TEMPLATE_3(T, strideOnOutput, kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths, \
+                                    kKnownDilationRows, kKnownDilationCols, kKnownDilationDepths) \
+          MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths, \
+                                    kKnownDilationRows, kKnownDilationCols, kKnownDilationDepths, 1, 1, 1) \
+          MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths, \
+                                    kKnownDilationRows, kKnownDilationCols, kKnownDilationDepths, 2, 2, 2) \
+          MY_TEMPLATE_INSTANCE(T, strideOnOutput, kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths, \
+                                    kKnownDilationRows, kKnownDilationCols, kKnownDilationDepths, 2, 2, 1)
 
-#define EXTERN_TEMPLATE_2(T, strideOnOutput, kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth) \
-          EXTERN_TEMPLATE_3(T, strideOnOutput, kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, 1, 1, 1)
+#define EXTERN_TEMPLATE_2(T, strideOnOutput, kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths) \
+          EXTERN_TEMPLATE_3(T, strideOnOutput, kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths, 1, 1, 1)
 
 #define EXTERN_TEMPLATE_1(T, strideOnOutput) \
           EXTERN_TEMPLATE_2(T, strideOnOutput, 3, 3, 3)
@@ -75,9 +75,9 @@ __global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedPara
 
     
     if(strideOnOutput){
-      col = col * p.stride_cols;
-      row = row * p.stride_rows;
-      depth = (depth + ((ldg(base_plane_data + (b * p.input_rows + row) * p.input_cols + col) + p.stride_depths - 1)/p.stride_depths))*p.stride_depths;
+      col = col * kKnownStrideCols;
+      row = row * kKnownStrideRows;
+      depth = (depth + ((ldg(base_plane_data + (b * p.input_rows + row) * p.input_cols + col) + kKnownStrideDepths - 1)/kKnownStrideDepths))*kKnownStrideDepths;
     } else {
       depth = depth + ldg(base_plane_data + (b * p.output_rows + row) * p.output_cols + col);
     }
@@ -89,12 +89,12 @@ __global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedPara
     T partial_sum = T(0.);
     for(int j = threadIdx.x%CUDA_WARP_SIZE; j < kernel_step; j += CUDA_WARP_SIZE){
       int32 in_ch   = j % p.input_channels;
-      int32 f_depth = j / p.input_channels % p.filter_depths;
-      int32 f_col   = j / p.input_channels / p.filter_depths % p.filter_cols;
-      int32 f_row   = j / p.input_channels / p.filter_depths / p.filter_cols;
+      int32 f_depth = j / p.input_channels % kKnownFilterDepths;
+      int32 f_col   = j / p.input_channels / kKnownFilterDepths % kKnownFilterCols;
+      int32 f_row   = j / p.input_channels / kKnownFilterDepths / kKnownFilterCols;
 
-      int32 orign_row = row + f_row * p.dilation_rows;
-      int32 orign_col = col + f_col * p.dilation_cols;
+      int32 orign_row = row + f_row * kKnownDilationRows;
+      int32 orign_col = col + f_col * kKnownDilationCols;
 
       T in_data = default_value;
 
@@ -103,7 +103,7 @@ __global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedPara
         bool is_padding = CHECK_PADDING(orign_row, p.input_rows) | CHECK_PADDING(orign_col, p.input_cols);
 
         if(!is_padding){
-          int32 in_depth = depth + f_depth*p.dilation_depths - ldg(base_plane_data + image_index);
+          int32 in_depth = depth + f_depth*kKnownDilationDepths - ldg(base_plane_data + image_index);
           is_padding = CHECK_PADDING(in_depth, p.input_depths);
           image_index = image_index * p.input_depths + in_depth;
           image_index = image_index * p.input_channels + in_ch;
@@ -116,11 +116,11 @@ __global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedPara
         bool is_padding = CHECK_PADDING(orign_row, p.output_rows) | CHECK_PADDING(orign_col, p.output_cols);
 
         if(!is_padding){
-          int32 orign_depth = depth + f_depth*p.dilation_depths;
-          is_padding = ((orign_row % p.stride_rows) != 0) | ((orign_col % p.stride_cols) != 0) | ((orign_depth % p.stride_depths) != 0);
-          orign_depth = (orign_depth/p.stride_depths) - (ldg(base_plane_data + image_index) + p.stride_depths - 1)/p.stride_depths ;
+          int32 orign_depth = depth + f_depth*kKnownDilationDepths;
+          is_padding = ((orign_row % kKnownStrideRows) != 0) | ((orign_col % kKnownStrideCols) != 0) | ((orign_depth % kKnownStrideDepths) != 0);
+          orign_depth = (orign_depth/kKnownStrideDepths) - (ldg(base_plane_data + image_index) + kKnownStrideDepths - 1)/kKnownStrideDepths ;
           is_padding |= CHECK_PADDING(orign_depth, p.input_depths);
-          image_index = ((b * p.input_rows + orign_row/p.stride_rows) * p.input_cols + orign_col/p.stride_cols) * p.input_depths + orign_depth;
+          image_index = ((b * p.input_rows + orign_row/kKnownStrideRows) * p.input_cols + orign_col/kKnownStrideCols) * p.input_depths + orign_depth;
           image_index = image_index * p.input_channels + in_ch;
           if(!is_padding){
             in_data = ldg(images_data + image_index);
@@ -168,7 +168,7 @@ void SparseConv3DFastFixedParamFunctor<Eigen::GpuDevice, T, strideOnOutput, SPAR
                                                 T * out_data)
 {
   int64 loop_count = static_cast<int64>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
-  int kernel_step = p.filter_rows * p.filter_cols * p.filter_depths * p.input_channels;
+  int kernel_step = kKnownFilterRows * kKnownFilterCols * kKnownFilterDepths * p.input_channels;
 
   int block_per_grid = 0;
   int thread_per_block = 0;
@@ -219,16 +219,16 @@ __global__ void SparseConv3DFastFixedParamFilterGradKernel(const int32 count, co
   T default_value_grad = T(0.);
   const T default_value = ldg(default_channel_value);
   for(int i = blockIdx.x; i < count; i += gridDim.x){
-    int depth = i % p.filter_depths;
-    int col   = i / p.filter_depths % p.filter_cols;
-    int row   = i / p.filter_depths / p.filter_cols % p.filter_rows;
-    int in_ch = i / p.filter_depths / p.filter_cols / p.filter_rows;
+    int depth = i % kKnownFilterDepths;
+    int col   = i / kKnownFilterDepths % kKnownFilterCols;
+    int row   = i / kKnownFilterDepths / kKnownFilterCols % kKnownFilterRows;
+    int in_ch = i / kKnownFilterDepths / kKnownFilterCols / kKnownFilterRows;
 
-    int filter_grad_out_channel_ptr = (((row*p.filter_cols + col)*p.filter_depths + depth)*p.input_channels+in_ch)*p.output_channels;
+    int filter_grad_out_channel_ptr = (((row*kKnownFilterCols + col)*kKnownFilterDepths + depth)*p.input_channels+in_ch)*p.output_channels;
 
-    col = col * p.dilation_cols - p.padding_cols;
-    row = row * p.dilation_rows - p.padding_rows;
-    depth = depth * p.dilation_depths - p.padding_depths;
+    col = col * kKnownDilationCols - p.padding_cols;
+    row = row * kKnownDilationRows - p.padding_rows;
+    depth = depth * kKnownDilationDepths - p.padding_depths;
     
     T filter_grad = T(0.);
     for(int j = out_id_in_step; j < image_step; j += d_step){
@@ -239,12 +239,12 @@ __global__ void SparseConv3DFastFixedParamFilterGradKernel(const int32 count, co
       
       bool is_padding;
       if(strideOnOutput){
-        int out_d = ldg(base_plane_data + (im_n*p.input_rows + im_r * p.stride_rows)*p.input_cols+im_c * p.stride_cols);
-        im_r = im_r * p.stride_rows + row;
-        im_c = im_c * p.stride_cols + col;
+        int out_d = ldg(base_plane_data + (im_n*p.input_rows + im_r * kKnownStrideRows)*p.input_cols+im_c * kKnownStrideCols);
+        im_r = im_r * kKnownStrideRows + row;
+        im_c = im_c * kKnownStrideCols + col;
         is_padding = (CHECK_PADDING(im_r, p.input_rows) | CHECK_PADDING(im_c, p.input_cols));
         if(!is_padding){
-          im_d = (im_d + (out_d + p.stride_depths - 1)/p.stride_depths) * p.stride_depths + depth 
+          im_d = (im_d + (out_d + kKnownStrideDepths - 1)/kKnownStrideDepths) * kKnownStrideDepths + depth 
                                               - ldg(base_plane_data + (im_n*p.input_rows + im_r)*p.input_cols+im_c);
           is_padding = CHECK_PADDING(im_d, p.input_depths);
         }
@@ -253,14 +253,14 @@ __global__ void SparseConv3DFastFixedParamFilterGradKernel(const int32 count, co
         im_r = im_r + row;
         im_c = im_c + col;
         im_d = im_d + depth + out_d;
-        is_padding = ((im_r % p.stride_rows) != 0) | ((im_c % p.stride_cols) != 0) | ((im_d % p.stride_depths) != 0);
+        is_padding = ((im_r % kKnownStrideRows) != 0) | ((im_c % kKnownStrideCols) != 0) | ((im_d % kKnownStrideDepths) != 0);
         int32 depth_index = (im_n*p.output_rows + im_r)*p.output_cols+im_c;
 
-        im_r = im_r/p.stride_rows;
-        im_c = im_c/p.stride_cols;
+        im_r = im_r/kKnownStrideRows;
+        im_c = im_c/kKnownStrideCols;
         is_padding |= (CHECK_PADDING(im_r, p.input_rows) | CHECK_PADDING(im_c, p.input_cols));
         if(!is_padding){
-          im_d = (im_d/p.stride_depths) - (ldg(base_plane_data + depth_index) + p.stride_depths - 1)/p.stride_depths ;
+          im_d = (im_d/kKnownStrideDepths) - (ldg(base_plane_data + depth_index) + kKnownStrideDepths - 1)/kKnownStrideDepths ;
           is_padding = CHECK_PADDING(im_d, p.input_depths);
         }
       }
@@ -330,7 +330,7 @@ void SparseConv3DFastFixedParamFilterGradFunctor<Eigen::GpuDevice, T, strideOnOu
                                                 T * filter_grad_data,
                                                 T * default_channel_value_grad)
 {
-  int32 loop_count = p.filter_rows*p.filter_cols*p.filter_depths*p.input_channels;
+  int32 loop_count = kKnownFilterRows*kKnownFilterCols*kKnownFilterDepths*p.input_channels;
   int image_step = p.input_batches*p.output_rows*p.output_cols*p.output_depths;
 
   int block_per_grid = 0;

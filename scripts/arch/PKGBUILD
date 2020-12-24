@@ -26,7 +26,7 @@ prepare() {
 
   export TF_CUDA_VERSION=$(/opt/cuda/bin/nvcc --version | sed -n 's/^.*release \(.*\),.*/\1/p')
   export TF_CUDNN_VERSION=$(sed -n 's/^#define CUDNN_MAJOR\s*\(.*\).*/\1/p' /usr/include/cudnn.h)
-  export TF_CUDA_COMPUTE_CAPABILITIES=3.5,3.7,5.0,5.2,5.3,6.0,6.1,6.2,7.0,7.2,7.5
+  export TF_CUDA_COMPUTE_CAPABILITIES=5.2,7.5,8.6
 
 
   rm -rf custom_helper_op

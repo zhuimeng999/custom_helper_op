@@ -29,18 +29,9 @@ struct SparseConv3DFastFixedParams {
   int32 input_rows;
   int32 input_cols;
   int32 input_depths;
-  int32 filter_rows;
-  int32 filter_cols;
-  int32 filter_depths;
   int32 padding_rows;
   int32 padding_cols;
   int32 padding_depths;
-  int32 stride_rows;
-  int32 stride_cols;
-  int32 stride_depths;
-  int32 dilation_rows;
-  int32 dilation_cols;
-  int32 dilation_depths;
   int32 output_channels;
   int32 output_rows;
   int32 output_cols;
@@ -48,15 +39,46 @@ struct SparseConv3DFastFixedParams {
   bool dynamic_default;
 };
 
+#define DEFINE_FIXED_PARAM(name, _in_p) \
+  SparseConv3DFastFixedParams fp = { \
+    .input_batches = _in_p.input_batches, \
+    .input_channels = _in_p.input_channels, \
+    .input_rows = _in_p.input_rows, \
+    .input_cols = _in_p.input_cols, \
+    .input_depths = _in_p.input_depths, \
+    .padding_rows = _in_p.padding_rows, \
+    .padding_cols = _in_p.padding_cols, \
+    .padding_depths = _in_p.padding_depths, \
+    .output_channels = _in_p.output_channels, \
+    .output_rows = _in_p.output_rows, \
+    .output_cols = _in_p.output_cols, \
+    .output_depths = _in_p.output_depths, \
+    .dynamic_default = _in_p.dynamic_default \
+  };
+
+
+#define  CALL_FIXED_PARAM_ONCE(fh, fw, fd, dh, dw, dd, sh, sw, sd) \
+            if((p.filter_rows == fh) && (p.filter_cols == fw) && (p.filter_depths == fd) \
+                    && (p.dilation_rows == dh) && (p.dilation_cols == dw) && (p.dilation_depths == dd) \
+                    && (p.stride_rows == sh) && (p.stride_cols == sw) && (p.stride_depths == sd)){ \
+                CALL_FIXED_PARAM_KERNEL(fh, fw, fd, dh, dw, dd, sh, sw, sd); \
+                return; \
+              }
+
+#define CALL_FIXED_PARAM() \
+          CALL_FIXED_PARAM_ONCE(3, 3, 3, 1, 1, 1, 1, 1, 1) \
+          CALL_FIXED_PARAM_ONCE(3, 3, 3, 1, 1, 1, 2, 2, 2) \
+          CALL_FIXED_PARAM_ONCE(3, 3, 3, 1, 1, 1, 2, 2, 1) \
+
 #define SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST \
-        int kKnownFilterHeight, int kKnownFilterWidth, int kKnownFilterDepth, \
-        int kKnownDilationHeight, int kKnownDilationWidth, int kKnownDilationDepth, \
-        int kKnownStrideHeight, int kKnownStrideWidth, int kKnownStrideDepth
+        int kKnownFilterRows, int kKnownFilterCols, int kKnownFilterDepths, \
+        int kKnownDilationRows, int kKnownDilationCols, int kKnownDilationDepths, \
+        int kKnownStrideRows, int kKnownStrideCols, int kKnownStrideDepths
 
 #define SPARSE_CONV3D_FIX_PARAMETOR_ARG_LIST \
-        kKnownFilterHeight, kKnownFilterWidth, kKnownFilterDepth, \
-        kKnownDilationHeight, kKnownDilationWidth, kKnownDilationDepth, \
-        kKnownStrideHeight, kKnownStrideWidth, kKnownStrideDepth
+        kKnownFilterRows, kKnownFilterCols, kKnownFilterDepths, \
+        kKnownDilationRows, kKnownDilationCols, kKnownDilationDepths, \
+        kKnownStrideRows, kKnownStrideCols, kKnownStrideDepths
 
 namespace functor {
 

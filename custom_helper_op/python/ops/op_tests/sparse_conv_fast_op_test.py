@@ -39,7 +39,7 @@ class SparseConv3DFastTest(test.TestCase, parameterized.TestCase):
         full_in_shape = np.array((IMAGE_HEIGHT, IMAGE_WIDTH, out_depth))
         full_out_shape = (full_in_shape + np.array(test_strides) - 1)//np.array(test_strides)
 
-        images_all = tf.random.uniform([BATCH_SIZE, *full_in_shape, IN_CHANNELS], dtype=tf.float32)
+        images_all = tf.random.uniform([BATCH_SIZE, *full_in_shape, IN_CHANNELS], dtype=tf.float64)
         filters = tf.random.uniform([*KERNEL_SIZE, IN_CHANNELS, OUT_CHANNELS], dtype=images_all.dtype)
         base_plane = tf.random.uniform([BATCH_SIZE, in_shape[0], in_shape[1], 1], minval=0, maxval=(full_in_shape[2] - in_shape[2] + 1), dtype=tf.int32)
         default_value = tf.random.uniform([], dtype=images_all.dtype)

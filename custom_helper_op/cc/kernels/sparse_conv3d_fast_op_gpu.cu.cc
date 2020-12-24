@@ -285,6 +285,14 @@ void SparseConv3DFastFunctor<Eigen::GpuDevice, T, strideOnOutput>::operator()(co
                                                 const int32* base_plane_data,
                                                 T * out_data)
 {
+  #define CALL_FIXED_PARAM_KERNEL(fh, fw, fd, dh, dw, dd, sh, sw, sd) \
+            SparseConv3DFastFixedParamFunctor<Eigen::GpuDevice, T, strideOnOutput, fh, fw, fd, dh, dw, dd, sh, sw, sd>()(d, fp, images_data, filter_data, default_channel_value, base_plane_data, out_data)
+
+  DEFINE_FIXED_PARAM(fp, p);
+
+  CALL_FIXED_PARAM()
+  #undef CALL_FIXED_PARAM_KERNEL
+
   int64 loop_count = static_cast<int64>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
   int kernel_step = p.filter_rows * p.filter_cols * p.filter_depths * p.input_channels;
 
@@ -576,6 +584,15 @@ void SparseConv3DFastFilterGradFunctor<Eigen::GpuDevice, T, strideOnOutput, dyna
                                                 T * filter_grad_data,
                                                 T * default_channel_value_grad)
 {
+  #define CALL_FIXED_PARAM_KERNEL(fh, fw, fd, dh, dw, dd, sh, sw, sd) \
+            SparseConv3DFastFixedParamFilterGradFunctor<Eigen::GpuDevice, T, strideOnOutput, dynamic_default, fh, fw, fd, dh, dw, dd, sh, sw, sd>()( \
+                                    d, fp, images_data, filter_data, default_channel_value, base_plane_data, out_grad_data, filter_grad_data, default_channel_value_grad)
+
+  DEFINE_FIXED_PARAM(fp, p);
+
+  CALL_FIXED_PARAM()
+  #undef CALL_FIXED_PARAM_KERNEL
+
   int32 loop_count = p.filter_rows*p.filter_cols*p.filter_depths*p.input_channels;
   int image_step = p.input_batches*p.output_rows*p.output_cols*p.output_depths;
 
