@@ -54,7 +54,7 @@ typedef Eigen::GpuDevice GPUDevice;
 // Note: this function does not synchronize, and therefore the memory range is
 // not guaranteed to be zero until the next kernel launch.
 template <typename T, bool strideOnOutput, SPARSE_CONV3D_FIX_PARAMETOR_DEF_LIST>
-__global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedParams p, const int64 count, const int kernel_step,
+__global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedParams p, const int32 count, const int kernel_step,
                                                                                           const T* images_data, 
                                                                                           const T* filter_data, 
                                                                                           const T* default_channel_value, 
@@ -66,7 +66,7 @@ __global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedPara
 
   const T default_value = ldg(default_channel_value);
 
-  for(int64 i = ((blockIdx.x * blockDim.x + threadIdx.x)/CUDA_WARP_SIZE); i < count; i += (gridDim.x * (blockDim.x/CUDA_WARP_SIZE))){
+  for(int32 i = ((blockIdx.x * blockDim.x + threadIdx.x)/CUDA_WARP_SIZE); i < count; i += (gridDim.x * (blockDim.x/CUDA_WARP_SIZE))){
     int32 out_ch  = i % p.output_channels;
     int32 depth   = i / p.output_channels % p.output_depths;
     int32 col     = i / p.output_channels / p.output_depths % p.output_cols;
@@ -99,7 +99,7 @@ __global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedPara
       T in_data = default_value;
 
       if(strideOnOutput){
-        int64 image_index = (b * p.input_rows + orign_row) * p.input_cols + orign_col;
+        int32 image_index = (b * p.input_rows + orign_row) * p.input_cols + orign_col;
         bool is_padding = CHECK_PADDING(orign_row, p.input_rows) | CHECK_PADDING(orign_col, p.input_cols);
 
         if(!is_padding){
@@ -112,7 +112,7 @@ __global__ void SparseConv3DFastFixedParamKernel(const SparseConv3DFastFixedPara
           }
         }
       } else {
-        int64 image_index = (b * p.output_rows + orign_row) * p.output_cols + orign_col;
+        int32 image_index = (b * p.output_rows + orign_row) * p.output_cols + orign_col;
         bool is_padding = CHECK_PADDING(orign_row, p.output_rows) | CHECK_PADDING(orign_col, p.output_cols);
 
         if(!is_padding){
@@ -167,7 +167,12 @@ void SparseConv3DFastFixedParamFunctor<Eigen::GpuDevice, T, strideOnOutput, SPAR
                                                 const int32* base_plane_data,
                                                 T * out_data)
 {
-  int64 loop_count = static_cast<int64>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
+  int64 image_size = static_cast<int64>(p.input_batches)*p.input_rows*p.input_cols*p.input_depths*p.input_channels;
+  int64 output_size = static_cast<int64>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
+  CHECK_LE(image_size, static_cast<int64>(INT32_MAX));
+  CHECK_LE(output_size, static_cast<int64>(INT32_MAX));
+
+  int32 loop_count = static_cast<int32>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
   int kernel_step = kKnownFilterRows * kKnownFilterCols * kKnownFilterDepths * p.input_channels;
 
   int block_per_grid = 0;
@@ -330,6 +335,11 @@ void SparseConv3DFastFixedParamFilterGradFunctor<Eigen::GpuDevice, T, strideOnOu
                                                 T * filter_grad_data,
                                                 T * default_channel_value_grad)
 {
+  int64 image_size = static_cast<int64>(p.input_batches)*p.input_rows*p.input_cols*p.input_depths*p.input_channels;
+  int64 output_size = static_cast<int64>(p.input_batches)*p.output_rows*p.output_cols*p.output_depths*p.output_channels;
+  CHECK_LE(image_size, static_cast<int64>(INT32_MAX));
+  CHECK_LE(output_size, static_cast<int64>(INT32_MAX));
+
   int32 loop_count = kKnownFilterRows*kKnownFilterCols*kKnownFilterDepths*p.input_channels;
   int image_step = p.input_batches*p.output_rows*p.output_cols*p.output_depths;
 
